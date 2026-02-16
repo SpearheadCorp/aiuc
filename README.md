@@ -177,6 +177,18 @@ npm run preview
 
 ## Deployment
 
+### Automated Deployment (GitHub Actions)
+
+The recommended way to deploy is through GitHub Actions. Pushing to the `main` branch will automatically build the frontend, sync assets to S3, and update the Lambda function.
+
+#### Setup (One-time)
+Add the following **Secrets** to your GitHub repository (`Settings` > `Secrets` > `Actions`):
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION` (e.g., `us-east-2`)
+- `S3_BUCKET_NAME` (e.g., `auic`)
+- `LAMBDA_FUNCTION_NAME` (e.g., `dev-aiuc-frontend`)
+
 ### Manual GUI Deployment (AWS Console)
 
 #### 1. Build & Package
