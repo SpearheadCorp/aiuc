@@ -23,7 +23,8 @@ export const useS3Data = (): UseS3DataReturn => {
             try {
                 setLoadingUseCase(true);
                 setErrorUseCase(null);
-                const response = await fetch("/data/use_cases.json");
+                const response = await fetch("/api/data/use-cases");
+                // const response = await fetch("/data/use_cases.json");
                 if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
                 const rawData = await response.json();
                 const mappedData = rawData.map((item: any) => ({
@@ -55,7 +56,8 @@ export const useS3Data = (): UseS3DataReturn => {
             try {
                 setLoadingIndustry(true);
                 setErrorIndustry(null);
-                const response = await fetch("/data/industry_use_cases.json");
+                // const response = await fetch("/data/industry_use_cases.json");
+                const response = await fetch("/api/data/industry");
                 if (!response.ok) throw new Error(`Failed to fetch industry data: ${response.status}`);
                 const rawData = await response.json();
                 const mappedData = rawData.map((item: any) => ({
