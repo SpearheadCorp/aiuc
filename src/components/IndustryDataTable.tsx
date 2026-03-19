@@ -72,7 +72,6 @@ export default function IndustryDataTable({
 }: IndustryDataTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState("");
 
   // Contact dialog state
@@ -352,42 +351,8 @@ export default function IndustryDataTable({
   const columns = useMemo<ColumnDef<IndustryData>[]>(
     () => [
       {
-        id: "select",
-        header: ({ table }) => (
-          <Checkbox
-            checked={table.getIsAllPageRowsSelected()}
-            indeterminate={table.getIsSomePageRowsSelected()}
-            onChange={table.getToggleAllPageRowsSelectedHandler()}
-            size="small"
-            sx={{
-              color: PURE_ORANGE,
-              "&.Mui-checked": { color: PURE_ORANGE },
-              "&.MuiCheckbox-indeterminate": { color: PURE_ORANGE },
-            }}
-          />
-        ),
-        cell: ({ row }) => (
-          <Checkbox
-            checked={row.getIsSelected()}
-            disabled={!row.getCanSelect()}
-            indeterminate={row.getIsSomeSelected()}
-            onChange={row.getToggleSelectedHandler()}
-            size="small"
-            sx={{
-              color: PURE_ORANGE,
-              "&.Mui-checked": { color: PURE_ORANGE },
-            }}
-          />
-        ),
-        size: 50,
-      },
-      {
         id: "contact",
-        header: () => (
-          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.8rem" }}>
-            Contact
-          </Typography>
-        ),
+        header: () => null,
         cell: ({ row }) => (
           <Tooltip title="I'm interested — contact me" arrow>
             <IconButton
@@ -412,7 +377,7 @@ export default function IndustryDataTable({
             </IconButton>
           </Tooltip>
         ),
-        size: 100,
+        size: 50,
       },
       // Define Industry Data Columns
       {
@@ -815,10 +780,8 @@ export default function IndustryDataTable({
     columns,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    state: { sorting, rowSelection },
+    state: { sorting },
     onSortingChange: setSorting,
-    onRowSelectionChange: setRowSelection,
-    enableRowSelection: true,
     getRowId: (row) => row.Id,
   });
 

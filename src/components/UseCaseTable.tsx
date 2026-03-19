@@ -71,7 +71,6 @@ export default function UseCaseTable({
 }: UseCaseTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState("");
 
   // Contact dialog state
@@ -362,52 +361,8 @@ export default function UseCaseTable({
   const columns = useMemo<ColumnDef<UseCaseData>[]>(
     () => [
       {
-        id: "select",
-        header: ({ table }) => (
-          <Checkbox
-            checked={table.getIsAllPageRowsSelected()}
-            indeterminate={table.getIsSomePageRowsSelected()}
-            onChange={table.getToggleAllPageRowsSelectedHandler()}
-            size="small"
-            sx={{
-              color: PURE_ORANGE,
-              "&.Mui-checked": { color: PURE_ORANGE },
-              "&.MuiCheckbox-indeterminate": { color: PURE_ORANGE },
-            }}
-          />
-        ),
-        cell: ({ row }) => (
-          <Checkbox
-            checked={row.getIsSelected()}
-            disabled={!row.getCanSelect()}
-            indeterminate={row.getIsSomeSelected()}
-            onChange={row.getToggleSelectedHandler()}
-            size="small"
-            sx={{
-              color: PURE_ORANGE,
-              "&.Mui-checked": { color: PURE_ORANGE },
-            }}
-          />
-        ),
-        size: 50,
-      },
-      {
         id: "contact",
-        header: () => (
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              width: "100%",
-              height: "100%",
-            }}
-          >
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              Contact
-            </Typography>
-          </Box>
-        ),
+        header: () => null,
         cell: ({ row }) => (
           <Tooltip title="I'm interested — contact me" arrow>
             <IconButton
@@ -429,13 +384,37 @@ export default function UseCaseTable({
             </IconButton>
           </Tooltip>
         ),
-        size: 100,
+        size: 50,
       },
       {
         accessorKey: "Capability",
-        header: ({ column }) => <CustomHeader column={column} />,
-        meta: { headerName: "Capability" },
-        size: 170,
+        header: ({ column }) => {
+          const sortDirection = column.getIsSorted();
+          return (
+            <Box
+              onClick={() => column.toggleSorting()}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                cursor: "pointer",
+                width: "100%",
+                height: "100%",
+                userSelect: "none"
+              }}
+            >
+              <Box sx={{ display: "flex", flexDirection: "column" }}>
+                {sortDirection === "asc" ? (
+                  <ArrowUpwardIcon sx={{ fontSize: 16, color: PURE_ORANGE }} />
+                ) : sortDirection === "desc" ? (
+                  <ArrowDownwardIcon sx={{ fontSize: 16, color: PURE_ORANGE }} />
+                ) : (
+                  <Box sx={{ width: 16, height: 16 }} />
+                )}
+              </Box>
+            </Box>
+          );
+        },
+        size: 60,
         enableSorting: true,
         cell: ({ row, getValue }) => {
           const rowId = row.original.id;
@@ -753,10 +732,8 @@ export default function UseCaseTable({
     columns,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    state: { sorting, rowSelection },
+    state: { sorting },
     onSortingChange: setSorting,
-    onRowSelectionChange: setRowSelection,
-    enableRowSelection: true,
     getRowId: (row) => String(row.id),
   });
 

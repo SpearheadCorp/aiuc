@@ -34,7 +34,7 @@ export default function ContactDialog({
   const [fromEmail, setFromEmail] = useState(userEmail);
   const [subjectLine, setSubjectLine] = useState(subject);
   const [message, setMessage] = useState(
-    "Hi,\n\nI'm interested in this use case. Please contact me to discuss further.\n\nThank you."
+    "Hi,\nI'm interested in this use case. Please contact me to discuss further.\nThank you."
   );
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{
@@ -47,7 +47,7 @@ export default function ContactDialog({
     setFromEmail(userEmail);
     setSubjectLine(subject);
     setMessage(
-      "Hi,\n\nI'm interested in this use case. Please contact me to discuss further.\n\nThank you."
+      "Hi,\nI'm interested in this use case. Please contact me to discuss further.\nThank you."
     );
     setResult(null);
     setSending(false);

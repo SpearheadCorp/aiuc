@@ -1,8 +1,10 @@
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 
 const s3 = new S3Client({ region: process.env.S3_REGION });
 const ses = new SESClient({ region: process.env.S3_REGION });
+const secretsManager = new SecretsManagerClient({ region: process.env.S3_REGION || process.env.AWS_REGION });
 const BUCKET = process.env.BUCKET_NAME;
 const DIST_PREFIX = process.env.DIST_PREFIX;
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "aiuc@purestorage.com";
@@ -105,6 +107,54 @@ export async function handler(event) {
     }
     if (path === "/api/data/industry" || path === "/api/data/industry/") {
         return getS3Object("industry_use_cases.json", "application/json");
+    }
+
+    // --- Config API route ---
+    if (path === "/api/config" || path === "/api/config/") {
+        try {
+            const issuer = process.env.OKTA_ISSUER;
+            const secretName = process.env.AIUC_SECRET_NAME;
+
+            if (!issuer || !secretName) {
+                console.warn("OKTA_ISSUER or AIUC_SECRET_NAME not set");
+                return {
+                    statusCode: 500,
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ error: "Server configuration error" }),
+                };
+            }
+
+            const command = new GetSecretValueCommand({ SecretId: secretName });
+            const response = await secretsManager.send(command);
+            
+            let secretData = {};
+            if ("SecretString" in response) {
+                secretData = JSON.parse(response.SecretString);
+            }
+
+            const clientId = secretData.OKTA_CLIENT_ID;
+
+            if (!clientId) {
+                return {
+                    statusCode: 500,
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ error: "OKTA_CLIENT_ID not found in secret" }),
+                };
+            }
+
+            return {
+                statusCode: 200,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ issuer, clientId }),
+            };
+        } catch (err) {
+            console.error("Config fetch error:", err);
+            return {
+                statusCode: 500,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ error: "Failed to fetch configuration" }),
+            };
+        }
     }
 
     // --- Contact API route ---

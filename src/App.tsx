@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Box,
   Typography,
@@ -6,8 +6,10 @@ import {
   Tab,
   CssBaseline,
   Link,
+  CircularProgress,
 } from "@mui/material";
 import { ThemeProvider } from "@mui/material/styles";
+import { useOktaAuth } from "@okta/okta-react";
 import EmailIcon from "@mui/icons-material/Email";
 import Logo from "./components/Logo";
 import UseCaseTable from "./components/UseCaseTable";
@@ -21,8 +23,18 @@ function App() {
   // Tab State
   const [activeTab, setActiveTab] = useState(0);
 
+  // Okta auth state (for redirect guard)
+  const { authState, oktaAuth } = useOktaAuth();
+
   // Okta user info
   const { userName, userEmail, isAuthenticated, isLoading: oktaLoading } = useOktaUser();
+
+  // Redirect to Okta login if not authenticated
+  // useEffect(() => {
+  //   if (authState && !authState.isAuthenticated) {
+  //     oktaAuth.signInWithRedirect();
+  //   }
+  // }, [authState, oktaAuth]);
 
   // Use custom hook for data
   const {
@@ -37,6 +49,31 @@ function App() {
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
   };
+
+  // Show spinner while Okta is determining auth state or redirecting
+  // if (!authState || !authState.isAuthenticated) {
+  //   return (
+  //     <ThemeProvider theme={theme}>
+  //       <CssBaseline />
+  //       <Box
+  //         sx={{
+  //           display: "flex",
+  //           flexDirection: "column",
+  //           alignItems: "center",
+  //           justifyContent: "center",
+  //           height: "100vh",
+  //           gap: 2,
+  //           backgroundColor: "#fafafa",
+  //         }}
+  //       >
+  //         <CircularProgress sx={{ color: PURE_ORANGE }} />
+  //         <Typography variant="body2" sx={{ color: "#666" }}>
+  //           Redirecting to login...
+  //         </Typography>
+  //       </Box>
+  //     </ThemeProvider>
+  //   );
+  // }
 
   return (
     <ThemeProvider theme={theme}>
