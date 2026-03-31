@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
+import { useState } from "react";
 import {
   Box,
   Typography,
@@ -7,36 +8,32 @@ import {
   CssBaseline,
   Link,
   CircularProgress,
+  Button,
 } from "@mui/material";
 import { ThemeProvider } from "@mui/material/styles";
-import { useOktaAuth } from "@okta/okta-react";
 import EmailIcon from "@mui/icons-material/Email";
 import Logo from "./components/Logo";
 import UseCaseTable from "./components/UseCaseTable";
 import IndustryDataTable from "./components/IndustryDataTable";
 import { theme, PURE_ORANGE } from "./theme";
 import { useS3Data } from "./hooks/useS3Data";
-import { useOktaUser } from "./hooks/useOktaUser";
+import { useCognitoUser } from "./hooks/useCognitoUser";
+import { useLogger } from "./hooks/useLogger";
+import { APP_CONFIG } from "./config/appConfig";
 import "./globals.css";
 
 function App() {
-  // Tab State
   const [activeTab, setActiveTab] = useState(0);
 
-  // Okta auth state (for redirect guard)
-  const { authState, oktaAuth } = useOktaAuth();
+  const { userName, userEmail, isRegistered, isChecking } = useCognitoUser();
+  const { logClick, logPageView } = useLogger();
 
-  // Okta user info
-  const { userName, userEmail, isAuthenticated, isLoading: oktaLoading } = useOktaUser();
+  // Log page view on mount
+  useEffect(() => {
+    logPageView();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Redirect to Okta login if not authenticated
-  // useEffect(() => {
-  //   if (authState && !authState.isAuthenticated) {
-  //     oktaAuth.signInWithRedirect();
-  //   }
-  // }, [authState, oktaAuth]);
-
-  // Use custom hook for data
   const {
     useCaseData,
     industryData,
@@ -46,34 +43,11 @@ function App() {
     errorIndustry,
   } = useS3Data();
 
+  const TAB_NAMES = ["Case Study", "Industry Data"];
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
+    logClick("tab", { tabName: TAB_NAMES[newValue] });
   };
-
-  // Show spinner while Okta is determining auth state or redirecting
-  // if (!authState || !authState.isAuthenticated) {
-  //   return (
-  //     <ThemeProvider theme={theme}>
-  //       <CssBaseline />
-  //       <Box
-  //         sx={{
-  //           display: "flex",
-  //           flexDirection: "column",
-  //           alignItems: "center",
-  //           justifyContent: "center",
-  //           height: "100vh",
-  //           gap: 2,
-  //           backgroundColor: "#fafafa",
-  //         }}
-  //       >
-  //         <CircularProgress sx={{ color: PURE_ORANGE }} />
-  //         <Typography variant="body2" sx={{ color: "#666" }}>
-  //           Redirecting to login...
-  //         </Typography>
-  //       </Box>
-  //     </ThemeProvider>
-  //   );
-  // }
 
   return (
     <ThemeProvider theme={theme}>
@@ -126,38 +100,36 @@ function App() {
               </Typography>
             </Box>
 
-            {/* User Greeting */}
-            <Box sx={{ minWidth: 180, display: "flex", justifyContent: "flex-end" }}>
-              {oktaLoading ? (
+            {/* User area */}
+            <Box sx={{ minWidth: 180, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 1.5 }}>
+              {isChecking ? null : isRegistered ? (
                 <Typography
                   variant="body2"
-                  sx={{ color: "#999", fontSize: "0.875rem" }}
+                  sx={{ color: "#1a1a1a", fontWeight: 500, fontSize: "0.9rem" }}
                 >
-                  Loading...
-                </Typography>
-              ) : isAuthenticated ? (
-                <Typography
-                  variant="body2"
-                  sx={{
-                    color: "#1a1a1a",
-                    fontWeight: 500,
-                    fontSize: "0.9rem",
-                  }}
-                >
-                  Hello, <strong>{userName}</strong>
+                  Hello, <strong>{userName || userEmail}</strong>
                 </Typography>
               ) : (
-                <Typography
-                  variant="body2"
-                  sx={{ color: "#999", fontSize: "0.875rem" }}
+                <Button
+                  component="a"
+                  href="/register"
+                  size="small"
+                  variant="contained"
+                  sx={{
+                    backgroundColor: PURE_ORANGE,
+                    color: "#fff",
+                    textTransform: "none",
+                    fontSize: "0.8rem",
+                    boxShadow: "none",
+                    "&:hover": { backgroundColor: "#cc4000", boxShadow: "none" },
+                  }}
                 >
-                  Not signed in
-                </Typography>
+                  Register for Full Access
+                </Button>
               )}
             </Box>
           </Box>
         </Box>
-
 
         {/* Tabs Bar */}
         <Box sx={{ borderBottom: 1, borderColor: "divider", bgcolor: "background.paper", px: 4 }}>
@@ -186,21 +158,31 @@ function App() {
             p: 3
           }}
         >
-          {activeTab === 0 && (
-            <UseCaseTable
-              data={useCaseData}
-              loading={loadingUseCase}
-              error={errorUseCase}
-              userEmail={userEmail}
-            />
-          )}
-          {activeTab === 1 && (
-            <IndustryDataTable
-              data={industryData}
-              loading={loadingIndustry}
-              error={errorIndustry}
-              userEmail={userEmail}
-            />
+          {isChecking ? (
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1 }}>
+              <CircularProgress sx={{ color: PURE_ORANGE }} />
+            </Box>
+          ) : (
+            <>
+              {activeTab === 0 && (
+                <UseCaseTable
+                  data={useCaseData}
+                  loading={loadingUseCase}
+                  error={errorUseCase}
+                  userEmail={userEmail}
+                  isRegistered={isRegistered}
+                />
+              )}
+              {activeTab === 1 && (
+                <IndustryDataTable
+                  data={industryData}
+                  loading={loadingIndustry}
+                  error={errorIndustry}
+                  userEmail={userEmail}
+                  isRegistered={isRegistered}
+                />
+              )}
+            </>
           )}
         </Box>
 
@@ -221,10 +203,7 @@ function App() {
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flex: 1 }}>
             <Typography
               variant="body2"
-              sx={{
-                color: "#666666",
-                fontSize: "0.75rem",
-              }}
+              sx={{ color: "#666666", fontSize: "0.75rem" }}
             >
               Powered by
             </Typography>
@@ -241,16 +220,12 @@ function App() {
           <Box sx={{ flex: 1, display: "flex", justifyContent: "center", gap: 3, alignItems: "center" }}>
             <Typography
               variant="body2"
-              sx={{
-                color: "#666666",
-                fontSize: "0.75rem",
-                fontWeight: 500,
-              }}
+              sx={{ color: "#666666", fontSize: "0.75rem", fontWeight: 500 }}
             >
               Confidential - Internal Use Only
             </Typography>
             <Link
-              href="mailto:aiuc@purestorage.com"
+              href={`mailto:${APP_CONFIG.contactEmail}`}
               underline="hover"
               sx={{
                 display: "flex",
@@ -271,11 +246,7 @@ function App() {
           <Box sx={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
             <Typography
               variant="body2"
-              sx={{
-                color: "#666666",
-                fontSize: "0.75rem",
-                fontWeight: 500,
-              }}
+              sx={{ color: "#666666", fontSize: "0.75rem", fontWeight: 500 }}
             >
               {activeTab === 0
                 ? `${useCaseData.length} use cases`

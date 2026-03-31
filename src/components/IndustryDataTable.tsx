@@ -48,6 +48,11 @@ import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import type { IndustryData } from "../types";
 import { parseChipItems } from "../utils";
 import ContactDialog from "./ContactDialog";
+import RestrictedCell from "./RestrictedCell";
+import { useLogger } from "../hooks/useLogger";
+import { INDUSTRY_RESTRICTED_COLUMNS } from "../config/restrictedColumns";
+import { APP_CONFIG } from "../config/appConfig";
+import LockIcon from "@mui/icons-material/Lock";
 
 const PURE_ORANGE = "#fe5000";
 
@@ -62,6 +67,7 @@ interface IndustryDataTableProps {
   loading: boolean;
   error: string | null;
   userEmail: string;
+  isRegistered?: boolean;
 }
 
 export default function IndustryDataTable({
@@ -69,9 +75,11 @@ export default function IndustryDataTable({
   loading,
   error,
   userEmail,
+  isRegistered = false,
 }: IndustryDataTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState("");
 
   // Contact dialog state
@@ -126,6 +134,22 @@ export default function IndustryDataTable({
     field: string;
   } | null>(null);
 
+  const { logSearch, logClick, logColumnClick, logRowClick, logFilter } = useLogger();
+  const isAuthenticated = isRegistered;
+
+  // Debounced search logging — fires 500ms after the user stops typing
+  const searchLogTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (searchLogTimer.current) clearTimeout(searchLogTimer.current);
+    if (!globalFilter) return;
+    searchLogTimer.current = setTimeout(() => {
+      logSearch(globalFilter);
+    }, 500);
+    return () => {
+      if (searchLogTimer.current) clearTimeout(searchLogTimer.current);
+    };
+  }, [globalFilter, logSearch]);
+
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
   // Helper function to toggle row expansion
@@ -139,7 +163,8 @@ export default function IndustryDataTable({
       }
       return newSet;
     });
-  }, []);
+    logRowClick(rowId);
+  }, [logRowClick]);
 
   // Helper function to render chips
   const renderChips = useCallback(
@@ -276,6 +301,7 @@ export default function IndustryDataTable({
       const handleFilterClick = (event: React.MouseEvent<HTMLElement>) => {
         event.stopPropagation();
         setFilterAnchorEl({ element: event.currentTarget, field });
+        logFilter(field, { action: "open" });
       };
 
       const sortDirection = column.getIsSorted();
@@ -301,7 +327,7 @@ export default function IndustryDataTable({
               cursor: "pointer",
               userSelect: "none",
             }}
-            onClick={() => column.toggleSorting()}
+            onClick={() => { column.toggleSorting(); logColumnClick(headerName); }}
           >
             <Typography
               variant="body2"
@@ -346,15 +372,53 @@ export default function IndustryDataTable({
   const handleContactClick = useCallback((aiUseCase: string, industry: string) => {
     setContactSubject(`Interest in: ${aiUseCase} (${industry})`);
     setContactDialogOpen(true);
-  }, []);
+    logClick("contact_button", { aiUseCase, industry });
+  }, [logClick]);
 
   const columns = useMemo<ColumnDef<IndustryData>[]>(
     () => [
       {
-        id: "contact",
-        header: () => null,
+        id: "select",
+        header: ({ table }) => (
+          <Checkbox
+            checked={table.getIsAllPageRowsSelected()}
+            indeterminate={table.getIsSomePageRowsSelected()}
+            onChange={table.getToggleAllPageRowsSelectedHandler()}
+            size="small"
+            sx={{
+              color: PURE_ORANGE,
+              "&.Mui-checked": { color: PURE_ORANGE },
+              "&.MuiCheckbox-indeterminate": { color: PURE_ORANGE },
+            }}
+          />
+        ),
         cell: ({ row }) => (
-          <Tooltip title="I'm interested — contact me" arrow>
+          <Checkbox
+            checked={row.getIsSelected()}
+            disabled={!row.getCanSelect()}
+            indeterminate={row.getIsSomeSelected()}
+            onChange={(e) => {
+              row.getToggleSelectedHandler()(e);
+              logRowClick(row.original.Id, { action: "select" });
+            }}
+            size="small"
+            sx={{
+              color: PURE_ORANGE,
+              "&.Mui-checked": { color: PURE_ORANGE },
+            }}
+          />
+        ),
+        size: 50,
+      },
+      {
+        id: "contact",
+        header: () => (
+          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.8rem" }}>
+            Contact
+          </Typography>
+        ),
+        cell: ({ row }) => (
+          <Tooltip title={APP_CONFIG.emailTooltipText} arrow>
             <IconButton
               size="small"
               onClick={(e) => {
@@ -377,7 +441,7 @@ export default function IndustryDataTable({
             </IconButton>
           </Tooltip>
         ),
-        size: 50,
+        size: 100,
       },
       // Define Industry Data Columns
       {
@@ -772,7 +836,7 @@ export default function IndustryDataTable({
         },
       },
     ],
-    [expandedRows, CustomHeader, renderChips, toggleRowExpansion, filters, handleContactClick]
+    [expandedRows, CustomHeader, renderChips, toggleRowExpansion, filters, handleContactClick, logRowClick]
   );
 
   const table = useReactTable({
@@ -780,8 +844,10 @@ export default function IndustryDataTable({
     columns,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    state: { sorting },
+    state: { sorting, rowSelection },
     onSortingChange: setSorting,
+    onRowSelectionChange: setRowSelection,
+    enableRowSelection: true,
     getRowId: (row) => row.Id,
   });
 
@@ -813,9 +879,19 @@ export default function IndustryDataTable({
     return columns.reduce((sum: number, col: ColumnDef<IndustryData, any>) => sum + (col.size || 150), 0);
   }, [columns]);
 
+  const hasActiveFilters = useMemo(() => {
+    return (
+      globalFilter !== "" ||
+      Object.values(filters).some(
+        (f) => f.selectedValues.size > 0 || f.textSearch !== ""
+      )
+    );
+  }, [filters, globalFilter]);
+
   const handleClearAllFilters = () => {
     setFilters(initializeFilters());
     setGlobalFilter("");
+    logFilter("all", { action: "clear_all" });
   };
 
   return (
@@ -874,6 +950,7 @@ export default function IndustryDataTable({
           size="small"
           startIcon={<ClearIcon />}
           onClick={handleClearAllFilters}
+          disabled={!hasActiveFilters}
           sx={{
             color: PURE_ORANGE,
             borderColor: PURE_ORANGE,
@@ -881,11 +958,58 @@ export default function IndustryDataTable({
               borderColor: "#cc4000",
               backgroundColor: "#fff5f2",
             },
+            "&.Mui-disabled": {
+              color: "grey.400",
+              borderColor: "grey.300",
+            },
           }}
         >
           Clear All Filters
         </Button>
       </Box>
+
+      {/* Access banner — shown only when user is not logged in */}
+      {!isAuthenticated && (
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: "#fff8f5",
+            border: `1px solid ${PURE_ORANGE}`,
+            borderRadius: "4px",
+            px: 2,
+            py: 1,
+            mb: 2,
+            gap: 2,
+            flexWrap: "wrap",
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <LockIcon sx={{ fontSize: 16, color: PURE_ORANGE }} />
+            <Typography variant="body2" sx={{ color: "#1a1a1a", fontSize: "0.85rem" }}>
+              Some columns are hidden. Register to view the full dataset.
+            </Typography>
+          </Box>
+          <Button
+            component="a"
+            href="/register"
+            size="small"
+            variant="contained"
+            sx={{
+              backgroundColor: PURE_ORANGE,
+              color: "#fff",
+              flexShrink: 0,
+              textTransform: "none",
+              fontSize: "0.8rem",
+              boxShadow: "none",
+              "&:hover": { backgroundColor: "#cc4000", boxShadow: "none" },
+            }}
+          >
+            Register Now
+          </Button>
+        </Box>
+      )}
 
       {error && (
         <Alert
@@ -951,37 +1075,47 @@ export default function IndustryDataTable({
               }}
             >
               {table.getHeaderGroups().map((headerGroup) =>
-                headerGroup.headers.map((header) => (
-                  <Box
-                    key={header.id}
-                    sx={{
-                      padding: "14px 16px",
-                      fontWeight: 600,
-                      fontSize: "0.875rem",
-                      color: "#1a1a1a",
-                      borderRight: "1px solid #e0e0e0",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      minHeight: "48px",
-                      backgroundColor: "#fafafa",
-                      transition: "background-color 0.2s ease",
-                      "&:hover": {
-                        backgroundColor: "#f5f5f5",
-                      },
-                      "&:last-child": {
-                        borderRight: "none",
-                      },
-                    }}
-                  >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                        header.column.columnDef.header,
-                        header.getContext()
+                headerGroup.headers.map((header) => {
+                  const isHeaderRestricted =
+                    !isAuthenticated &&
+                    INDUSTRY_RESTRICTED_COLUMNS.includes(header.column.id);
+                  return (
+                    <Box
+                      key={header.id}
+                      sx={{
+                        padding: "14px 16px",
+                        fontWeight: 600,
+                        fontSize: "0.875rem",
+                        color: isHeaderRestricted ? "#aaa" : "#1a1a1a",
+                        borderRight: "1px solid #e0e0e0",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        minHeight: "48px",
+                        backgroundColor: isHeaderRestricted ? "#f5f5f5" : "#fafafa",
+                        transition: "background-color 0.2s ease",
+                        "&:hover": {
+                          backgroundColor: "#f5f5f5",
+                        },
+                        "&:last-child": {
+                          borderRight: "none",
+                        },
+                      }}
+                    >
+                      {header.isPlaceholder ? null : (
+                        <>
+                          {flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
+                          )}
+                          {isHeaderRestricted && (
+                            <LockIcon sx={{ fontSize: 13, color: "#ccc", flexShrink: 0, ml: 0.5 }} />
+                          )}
+                        </>
                       )}
-                  </Box>
-                ))
+                    </Box>
+                  );
+                })
               )}
             </Box>
 
@@ -1020,31 +1154,42 @@ export default function IndustryDataTable({
                       },
                     }}
                   >
-                    {row.getVisibleCells().map((cell) => (
-                      <Box
-                        key={cell.id}
-                        sx={{
-                          padding: "16px",
-                          fontSize: "0.875rem",
-                          color: "#333",
-                          lineHeight: 1.5,
-                          borderRight: "1px solid #e0e0e0",
-                          overflow: "hidden",
-                          backgroundColor: isExpanded
-                            ? "#fafafa"
-                            : "transparent",
-                          transition: "all 0.2s ease",
-                          "&:last-child": {
-                            borderRight: "none",
-                          },
-                        }}
-                      >
-                        {flexRender(
-                          cell.column.columnDef.cell,
-                          cell.getContext()
-                        )}
-                      </Box>
-                    ))}
+                    {row.getVisibleCells().map((cell) => {
+                      const isCellRestricted =
+                        !isAuthenticated &&
+                        INDUSTRY_RESTRICTED_COLUMNS.includes(cell.column.id);
+                      return (
+                        <Box
+                          key={cell.id}
+                          sx={{
+                            padding: "16px",
+                            fontSize: "0.875rem",
+                            color: "#333",
+                            lineHeight: 1.5,
+                            borderRight: "1px solid #e0e0e0",
+                            overflow: "hidden",
+                            backgroundColor: isExpanded
+                              ? "#fafafa"
+                              : "transparent",
+                            transition: "all 0.2s ease",
+                            "&:last-child": {
+                              borderRight: "none",
+                            },
+                          }}
+                        >
+                          {isCellRestricted ? (
+                            <RestrictedCell
+                              rawValue={String(cell.getValue() ?? "")}
+                            />
+                          ) : (
+                            flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
+                            )
+                          )}
+                        </Box>
+                      );
+                    })}
                   </Box>
                 );
               })}
@@ -1060,6 +1205,9 @@ export default function IndustryDataTable({
         multiselectColumns={multiselectColumns}
         getUniqueValues={getUniqueValues}
         tableContainerRef={tableContainerRef}
+        onLogFilter={(action, columnName, data) =>
+          logFilter(columnName, { action, ...data })
+        }
       />
       <ContactDialog
         open={contactDialogOpen}
@@ -1080,6 +1228,7 @@ interface FilterPopupProps {
   multiselectColumns: string[];
   getUniqueValues: (field: string) => string[];
   tableContainerRef: React.RefObject<HTMLDivElement | null>;
+  onLogFilter?: (action: string, columnName: string, data?: Record<string, unknown>) => void;
 }
 
 const FilterPopup = ({
@@ -1090,6 +1239,7 @@ const FilterPopup = ({
   multiselectColumns,
   getUniqueValues,
   tableContainerRef,
+  onLogFilter,
 }: FilterPopupProps) => {
   const field = filterAnchorEl?.field || "";
   const isMultiselectField = multiselectColumns.includes(field);
@@ -1143,6 +1293,10 @@ const FilterPopup = ({
         textSearch: textSearch,
       },
     }));
+    onLogFilter?.("apply", field, {
+      textSearch,
+      selectedValues: Array.from(selectedValues),
+    });
     setFilterAnchorEl(null);
     requestAnimationFrame(() => {
       if (tableContainerRef.current) {
@@ -1160,6 +1314,7 @@ const FilterPopup = ({
       updated[field] = { selectedValues: new Set(), textSearch: "" };
       return updated;
     });
+    onLogFilter?.("clear", field);
     setFilterAnchorEl(null);
     requestAnimationFrame(() => {
       if (tableContainerRef.current) {

@@ -14,9 +14,9 @@ import {
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import SendIcon from "@mui/icons-material/Send";
+import { APP_CONFIG } from "../config/appConfig";
 
 const PURE_ORANGE = "#fe5000";
-const CONTACT_EMAIL = "aiuc@purestorage.com";
 
 interface ContactDialogProps {
   open: boolean;
@@ -33,9 +33,7 @@ export default function ContactDialog({
 }: ContactDialogProps) {
   const [fromEmail, setFromEmail] = useState(userEmail);
   const [subjectLine, setSubjectLine] = useState(subject);
-  const [message, setMessage] = useState(
-    "Hi,\nI'm interested in this use case. Please contact me to discuss further.\nThank you."
-  );
+  const [message, setMessage] = useState(APP_CONFIG.defaultContactMessage);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{
     type: "success" | "error";
@@ -46,9 +44,7 @@ export default function ContactDialog({
   const handleEnter = () => {
     setFromEmail(userEmail);
     setSubjectLine(subject);
-    setMessage(
-      "Hi,\nI'm interested in this use case. Please contact me to discuss further.\nThank you."
-    );
+    setMessage(APP_CONFIG.defaultContactMessage);
     setResult(null);
     setSending(false);
   };
@@ -106,7 +102,7 @@ export default function ContactDialog({
         }}
       >
         <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "1.1rem" }}>
-          I'm Interested — Contact Me
+          {APP_CONFIG.contactDialogTitle}
         </Typography>
         <IconButton size="small" onClick={onClose}>
           <CloseIcon fontSize="small" />
@@ -135,7 +131,7 @@ export default function ContactDialog({
           />
 
           <Typography variant="body2" sx={{ color: "#666" }}>
-            To: <strong>{CONTACT_EMAIL}</strong>
+            To: <strong>{APP_CONFIG.contactEmail}</strong>
           </Typography>
 
           <TextField
