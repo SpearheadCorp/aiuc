@@ -17,14 +17,14 @@ import { useS3Data } from "./hooks/useS3Data";
 import { useOktaUser } from "./hooks/useOktaUser";
 import "./globals.css";
 
+const CONTACT_EMAIL     = import.meta.env.VITE_CONTACT_EMAIL     || "aiuc@purestorage.com";
+const EMAIL_TOOLTIP_TEXT = import.meta.env.VITE_EMAIL_TOOLTIP_TEXT || "I'm interested — contact me";
+
 function App() {
-  // Tab State
   const [activeTab, setActiveTab] = useState(0);
 
-  // Okta user info
-  const { userName, userEmail, isAuthenticated, isLoading: oktaLoading } = useOktaUser();
+  const { userName, isAuthenticated, isLoading: oktaLoading, userEmail } = useOktaUser();
 
-  // Use custom hook for data
   const {
     useCaseData,
     industryData,
@@ -52,14 +52,7 @@ function App() {
             zIndex: 100,
           }}
         >
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            {/* Pure Storage Logo */}
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <Logo
                 src="/assets/purelogo.png"
@@ -70,16 +63,7 @@ function App() {
               />
             </Box>
 
-            {/* Title */}
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 3,
-                flex: 1,
-                justifyContent: "center",
-              }}
-            >
+            <Box sx={{ display: "flex", alignItems: "center", gap: 3, flex: 1, justifyContent: "center" }}>
               <Typography
                 variant="h6"
                 component="h6"
@@ -89,31 +73,17 @@ function App() {
               </Typography>
             </Box>
 
-            {/* User Greeting */}
-            <Box sx={{ minWidth: 180, display: "flex", justifyContent: "flex-end" }}>
+            <Box sx={{ minWidth: 180, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
               {oktaLoading ? (
-                <Typography
-                  variant="body2"
-                  sx={{ color: "#999", fontSize: "0.875rem" }}
-                >
+                <Typography variant="body2" sx={{ color: "#999", fontSize: "0.875rem" }}>
                   Loading...
                 </Typography>
               ) : isAuthenticated ? (
-                <Typography
-                  variant="body2"
-                  sx={{
-                    color: "#1a1a1a",
-                    fontWeight: 500,
-                    fontSize: "0.9rem",
-                  }}
-                >
+                <Typography variant="body2" sx={{ color: "#1a1a1a", fontWeight: 500, fontSize: "0.9rem" }}>
                   Hello, <strong>{userName}</strong>
                 </Typography>
               ) : (
-                <Typography
-                  variant="body2"
-                  sx={{ color: "#999", fontSize: "0.875rem" }}
-                >
+                <Typography variant="body2" sx={{ color: "#999", fontSize: "0.875rem" }}>
                   Not signed in
                 </Typography>
               )}
@@ -121,18 +91,13 @@ function App() {
           </Box>
         </Box>
 
-
         {/* Tabs Bar */}
         <Box sx={{ borderBottom: 1, borderColor: "divider", bgcolor: "background.paper", px: 4 }}>
           <Tabs
             value={activeTab}
             onChange={handleTabChange}
             aria-label="data tabs"
-            sx={{
-              "& .MuiTabs-indicator": {
-                backgroundColor: PURE_ORANGE,
-              }
-            }}
+            sx={{ "& .MuiTabs-indicator": { backgroundColor: PURE_ORANGE } }}
           >
             <Tab label="Case Study" id="tab-0" aria-controls="tabpanel-0" />
             <Tab label="Industry Data" id="tab-1" aria-controls="tabpanel-1" />
@@ -140,21 +105,15 @@ function App() {
         </Box>
 
         {/* Main Content Area */}
-        <Box
-          sx={{
-            flex: 1,
-            overflow: "hidden",
-            display: "flex",
-            flexDirection: "column",
-            p: 3
-          }}
-        >
+        <Box sx={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", p: 3 }}>
           {activeTab === 0 && (
             <UseCaseTable
               data={useCaseData}
               loading={loadingUseCase}
               error={errorUseCase}
               userEmail={userEmail}
+              contactEmail={CONTACT_EMAIL}
+              emailTooltipText={EMAIL_TOOLTIP_TEXT}
             />
           )}
           {activeTab === 1 && (
@@ -163,6 +122,8 @@ function App() {
               loading={loadingIndustry}
               error={errorIndustry}
               userEmail={userEmail}
+              contactEmail={CONTACT_EMAIL}
+              emailTooltipText={EMAIL_TOOLTIP_TEXT}
             />
           )}
         </Box>
@@ -180,40 +141,19 @@ function App() {
             zIndex: 100,
           }}
         >
-          {/* Left side - Powered by */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flex: 1 }}>
-            <Typography
-              variant="body2"
-              sx={{
-                color: "#666666",
-                fontSize: "0.75rem",
-              }}
-            >
+            <Typography variant="body2" sx={{ color: "#666666", fontSize: "0.75rem" }}>
               Powered by
             </Typography>
-            <Logo
-              src="/assets/spearhead.png"
-              alt="Spearhead"
-              width={100}
-              height={50}
-              fallbackText=""
-            />
+            <Logo src="/assets/spearhead.png" alt="Spearhead" width={100} height={50} fallbackText="" />
           </Box>
 
-          {/* Center - Confidential + Contact */}
           <Box sx={{ flex: 1, display: "flex", justifyContent: "center", gap: 3, alignItems: "center" }}>
-            <Typography
-              variant="body2"
-              sx={{
-                color: "#666666",
-                fontSize: "0.75rem",
-                fontWeight: 500,
-              }}
-            >
+            <Typography variant="body2" sx={{ color: "#666666", fontSize: "0.75rem", fontWeight: 500 }}>
               Confidential - Internal Use Only
             </Typography>
             <Link
-              href="mailto:aiuc@purestorage.com"
+              href={`mailto:${CONTACT_EMAIL}`}
               underline="hover"
               sx={{
                 display: "flex",
@@ -230,16 +170,8 @@ function App() {
             </Link>
           </Box>
 
-          {/* Right side - Row count */}
           <Box sx={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
-            <Typography
-              variant="body2"
-              sx={{
-                color: "#666666",
-                fontSize: "0.75rem",
-                fontWeight: 500,
-              }}
-            >
+            <Typography variant="body2" sx={{ color: "#666666", fontSize: "0.75rem", fontWeight: 500 }}>
               {activeTab === 0
                 ? `${useCaseData.length} use cases`
                 : `${industryData.length} industry records`}

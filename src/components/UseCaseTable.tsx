@@ -61,6 +61,8 @@ interface UseCaseTableProps {
   loading: boolean;
   error: string | null;
   userEmail: string;
+  contactEmail: string;
+  emailTooltipText: string;
 }
 
 export default function UseCaseTable({
@@ -68,6 +70,8 @@ export default function UseCaseTable({
   loading,
   error,
   userEmail,
+  contactEmail,
+  emailTooltipText,
 }: UseCaseTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -365,7 +369,7 @@ export default function UseCaseTable({
         id: "contact",
         header: () => null,
         cell: ({ row }) => (
-          <Tooltip title="I'm interested — contact me" arrow>
+          <Tooltip title={emailTooltipText} arrow>
             <IconButton
               size="small"
               onClick={(e) => {
@@ -750,6 +754,13 @@ export default function UseCaseTable({
     setGlobalFilter("");
   };
 
+  const hasActiveFilters = useMemo(() => {
+    if (globalFilter) return true;
+    return Object.values(filters).some(
+      (f) => f.selectedValues.size > 0 || f.textSearch !== ""
+    );
+  }, [filters, globalFilter]);
+
   return (
     <Box
       sx={{
@@ -806,12 +817,17 @@ export default function UseCaseTable({
           size="small"
           startIcon={<ClearIcon />}
           onClick={handleClearAllFilters}
+          disabled={!hasActiveFilters}
           sx={{
             color: PURE_ORANGE,
             borderColor: PURE_ORANGE,
             "&:hover": {
               borderColor: "#cc4000",
               backgroundColor: "#fff5f2",
+            },
+            "&.Mui-disabled": {
+              color: "#bbb",
+              borderColor: "#ddd",
             },
           }}
         >
@@ -998,6 +1014,7 @@ export default function UseCaseTable({
         onClose={() => setContactDialogOpen(false)}
         userEmail={userEmail}
         subject={contactSubject}
+        contactEmail={contactEmail}
       />
     </Box>
   );

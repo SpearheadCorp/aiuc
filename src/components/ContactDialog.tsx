@@ -16,13 +16,13 @@ import CloseIcon from "@mui/icons-material/Close";
 import SendIcon from "@mui/icons-material/Send";
 
 const PURE_ORANGE = "#fe5000";
-const CONTACT_EMAIL = "aiuc@purestorage.com";
 
 interface ContactDialogProps {
   open: boolean;
   onClose: () => void;
   userEmail: string;
   subject: string;
+  contactEmail: string;
 }
 
 export default function ContactDialog({
@@ -30,6 +30,7 @@ export default function ContactDialog({
   onClose,
   userEmail,
   subject,
+  contactEmail,
 }: ContactDialogProps) {
   const [fromEmail, setFromEmail] = useState(userEmail);
   const [subjectLine, setSubjectLine] = useState(subject);
@@ -67,7 +68,11 @@ export default function ContactDialog({
         }),
       });
       if (!response.ok) {
-        throw new Error(`Failed to send: ${response.status}`);
+        // Parse the JSON body to surface the real server error message
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(
+          errBody.error || `Failed to send (HTTP ${response.status})`
+        );
       }
       setResult({ type: "success", text: "Your message has been sent successfully!" });
       setTimeout(() => {
@@ -135,7 +140,7 @@ export default function ContactDialog({
           />
 
           <Typography variant="body2" sx={{ color: "#666" }}>
-            To: <strong>{CONTACT_EMAIL}</strong>
+            To: <strong>{contactEmail}</strong>
           </Typography>
 
           <TextField

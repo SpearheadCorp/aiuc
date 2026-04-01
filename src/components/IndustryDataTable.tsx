@@ -62,6 +62,8 @@ interface IndustryDataTableProps {
   loading: boolean;
   error: string | null;
   userEmail: string;
+  contactEmail: string;
+  emailTooltipText: string;
 }
 
 export default function IndustryDataTable({
@@ -69,6 +71,8 @@ export default function IndustryDataTable({
   loading,
   error,
   userEmail,
+  contactEmail,
+  emailTooltipText,
 }: IndustryDataTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -355,7 +359,7 @@ export default function IndustryDataTable({
         id: "contact",
         header: () => null,
         cell: ({ row }) => (
-          <Tooltip title="I'm interested — contact me" arrow>
+          <Tooltip title={emailTooltipText} arrow>
             <IconButton
               size="small"
               onClick={(e) => {
@@ -821,6 +825,13 @@ export default function IndustryDataTable({
     setGlobalFilter("");
   };
 
+  const hasActiveFilters = useMemo(() => {
+    if (globalFilter) return true;
+    return Object.values(filters).some(
+      (f) => f.selectedValues.size > 0 || f.textSearch !== ""
+    );
+  }, [filters, globalFilter]);
+
   return (
     <Box
       sx={{
@@ -877,12 +888,17 @@ export default function IndustryDataTable({
           size="small"
           startIcon={<ClearIcon />}
           onClick={handleClearAllFilters}
+          disabled={!hasActiveFilters}
           sx={{
             color: PURE_ORANGE,
             borderColor: PURE_ORANGE,
             "&:hover": {
               borderColor: "#cc4000",
               backgroundColor: "#fff5f2",
+            },
+            "&.Mui-disabled": {
+              color: "#bbb",
+              borderColor: "#ddd",
             },
           }}
         >
@@ -1069,6 +1085,7 @@ export default function IndustryDataTable({
         onClose={() => setContactDialogOpen(false)}
         userEmail={userEmail}
         subject={contactSubject}
+        contactEmail={contactEmail}
       />
     </Box>
   );

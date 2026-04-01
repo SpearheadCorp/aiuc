@@ -1,33 +1,34 @@
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import nodemailer from "nodemailer";
 
 const s3 = new S3Client({ region: process.env.S3_REGION });
-const ses = new SESClient({ region: process.env.S3_REGION });
-const BUCKET = process.env.BUCKET_NAME;
-const DIST_PREFIX = process.env.DIST_PREFIX;
-const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "aiuc@purestorage.com";
-const SENDER_EMAIL = process.env.SENDER_EMAIL || "aiuc@purestorage.com";
 
-/**
- * MIME type mapping for static assets
- */
+const BUCKET        = process.env.BUCKET_NAME;
+const DIST_PREFIX   = process.env.DIST_PREFIX;
+const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "aiuc@purestorage.com";
+const SMTP_HOST     = process.env.SMTP_HOST     || "";
+const SMTP_PORT     = process.env.SMTP_PORT     || "587";
+const SMTP_USER     = process.env.SMTP_USER     || "";
+const SMTP_PASS     = process.env.SMTP_PASS     || "";
+const SMTP_FROM     = process.env.SMTP_FROM     || SMTP_USER;
+
 const MIME_TYPES = {
     ".html": "text/html",
-    ".js": "application/javascript",
-    ".mjs": "application/javascript",
-    ".css": "text/css",
+    ".js":   "application/javascript",
+    ".mjs":  "application/javascript",
+    ".css":  "text/css",
     ".json": "application/json",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
+    ".png":  "image/png",
+    ".jpg":  "image/jpeg",
     ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".svg": "image/svg+xml",
-    ".ico": "image/x-icon",
+    ".gif":  "image/gif",
+    ".svg":  "image/svg+xml",
+    ".ico":  "image/x-icon",
     ".woff": "font/woff",
-    ".woff2": "font/woff2",
-    ".ttf": "font/ttf",
-    ".txt": "text/plain",
-    ".map": "application/json",
+    ".woff2":"font/woff2",
+    ".ttf":  "font/ttf",
+    ".txt":  "text/plain",
+    ".map":  "application/json",
 };
 
 function getMimeType(key) {
@@ -35,18 +36,13 @@ function getMimeType(key) {
     return MIME_TYPES[ext] || "application/octet-stream";
 }
 
-/**
- * Fetch an object from S3 and return it as a Lambda response
- */
 async function getS3Object(key, contentType) {
     try {
         const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
         const response = await s3.send(command);
         const body = await response.Body.transformToString();
 
-        // For binary assets (images, fonts), return base64 encoded
         const isBinary = contentType.startsWith("image/") || contentType.startsWith("font/");
-
         if (isBinary) {
             const bodyBytes = await (await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))).Body.transformToByteArray();
             return {
@@ -70,7 +66,6 @@ async function getS3Object(key, contentType) {
         };
     } catch (err) {
         if (err.name === "NoSuchKey") {
-            // For SPA routing: if file not found, serve index.html
             if (!key.includes(".")) {
                 return getS3Object(`${DIST_PREFIX}/index.html`, "text/html");
             }
@@ -89,17 +84,21 @@ async function getS3Object(key, contentType) {
     }
 }
 
-/**
- * Lambda handler — serves the Vite frontend and data API
- */
+function json(statusCode, data) {
+    return {
+        statusCode,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+    };
+}
+
 export async function handler(event) {
-    // Support both Function URL (rawPath) and ALB (path)
-    const path = event.rawPath || event.path || "/";
+    const path   = event.rawPath || event.path || "/";
     const method = event.requestContext?.http?.method || event.httpMethod || "GET";
 
     console.log(`[Request] ${method} ${path}`);
 
-    // --- Data API routes ---
+    // ── Data API ───────────────────────────────────────────────────────────────
     if (path === "/api/data/use-cases" || path === "/api/data/use-cases/") {
         return getS3Object("use_cases.json", "application/json");
     }
@@ -107,63 +106,50 @@ export async function handler(event) {
         return getS3Object("industry_use_cases.json", "application/json");
     }
 
-    // --- Contact API route ---
+    // ── POST /api/contact ──────────────────────────────────────────────────────
     if ((path === "/api/contact" || path === "/api/contact/") && method === "POST") {
         try {
             const body = JSON.parse(event.body || "{}");
             const { from, subject, message } = body;
 
             if (!from || !subject || !message) {
-                return {
-                    statusCode: 400,
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ error: "Missing required fields: from, subject, message" }),
-                };
+                return json(400, { error: "Missing required fields: from, subject, message" });
             }
 
-            const command = new SendEmailCommand({
-                Source: SENDER_EMAIL,
-                Destination: {
-                    ToAddresses: [CONTACT_EMAIL],
-                },
-                Message: {
-                    Subject: { Data: subject },
-                    Body: {
-                        Text: {
-                            Data: `From: ${from}\n\n${message}`,
-                        },
-                    },
-                },
-                ReplyToAddresses: [from],
+            if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+                return json(503, { error: "SMTP is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS in Lambda environment variables." });
+            }
+
+            const transporter = nodemailer.createTransport({
+                host: SMTP_HOST,
+                port: parseInt(SMTP_PORT, 10),
+                secure: false,
+                auth: { user: SMTP_USER, pass: SMTP_PASS },
             });
 
-            await ses.send(command);
+            await transporter.sendMail({
+                from:    SMTP_FROM,
+                to:      CONTACT_EMAIL,
+                replyTo: from,
+                subject,
+                text:    `From: ${from}\n\n${message}`,
+            });
 
-            return {
-                statusCode: 200,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ success: true, message: "Email sent successfully" }),
-            };
+            return json(200, { success: true, message: "Email sent successfully" });
         } catch (err) {
             console.error("Contact email error:", err);
-            return {
-                statusCode: 500,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ error: "Failed to send email" }),
-            };
+            return json(500, { error: `Failed to send email: ${err.message}` });
         }
     }
 
-    // --- Static file serving ---
+    // ── Static file serving ────────────────────────────────────────────────────
     let key;
     if (path === "/" || path === "") {
         key = `${DIST_PREFIX}/index.html`;
     } else {
-        // Remove leading slash and prepend dist prefix
         const cleanPath = path.startsWith("/") ? path.substring(1) : path;
         key = `${DIST_PREFIX}/${cleanPath}`;
     }
 
-    const contentType = getMimeType(key);
-    return getS3Object(key, contentType);
+    return getS3Object(key, getMimeType(key));
 }

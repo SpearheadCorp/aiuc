@@ -10,4 +10,5 @@ export const oktaAuth = new OktaAuth({
     redirectUri: REDIRECT_URI,
     scopes: ["openid", "profile", "email"],
     pkce: true,
+    restoreOriginalUri: undefined,
 });
