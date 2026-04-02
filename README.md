@@ -19,7 +19,8 @@
   <img src="https://img.shields.io/badge/AWS_Lambda-FF9900?style=for-the-badge&logo=awslambda&logoColor=white" alt="AWS Lambda" />
   <img src="https://img.shields.io/badge/Amazon_S3-569A31?style=for-the-badge&logo=amazons3&logoColor=white" alt="Amazon S3" />
   <img src="https://img.shields.io/badge/AWS_IAM-DD344C?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS IAM" />
-  <img src="https://img.shields.io/badge/AWS_SAM-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS SAM" />
+  <img src="https://img.shields.io/badge/AWS_Secrets_Manager-DD344C?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS Secrets Manager" />
+  <img src="https://img.shields.io/badge/Okta-007DC1?style=for-the-badge&logo=okta&logoColor=white" alt="Okta" />
 </p>
 
 <p align="center">
@@ -38,6 +39,7 @@
 - [Prerequisites](#prerequisites)
 - [Local Development](#local-development)
 - [Deployment](#deployment)
+  - [Step 3a: Okta Authentication via AWS Secrets Manager](#3a-okta-authentication-setup-aws-secrets-manager)
 - [Granting User Access](#granting-user-access)
 - [Testing Access](#testing-access)
 - [Tech Stack](#tech-stack)
@@ -323,13 +325,90 @@ your-bucket/
 1. Open the Lambda Console.
 2. Select your function (e.g., `dev-aiuc-frontend`) or the one you created above.
 3. In the **Code** tab → **Upload from** → **.zip file** → upload `lambda.zip`.
-4. Go to Configuration → Environment variables, and set:
+4. Go to **Configuration** → **Environment variables** → **Edit**, and set:
 
-| Key         | Value              |
-| ----------- | ------------------ |
-| BUCKET_NAME | <YOUR_BUCKET_NAME> |
-| S3_REGION   | <YOUR_REGION>      |
-| DIST_PREFIX | dist               |
+| Key              | Value                                              | Description                                        |
+| ---------------- | -------------------------------------------------- | -------------------------------------------------- |
+| `BUCKET_NAME`    | `<YOUR_BUCKET_NAME>`                               | S3 bucket storing frontend assets and JSON data    |
+| `S3_REGION`      | `<YOUR_REGION>` (e.g. `us-east-2`)                 | AWS region of the S3 bucket and Secrets Manager    |
+| `DIST_PREFIX`    | `dist`                                             | Folder inside S3 bucket containing built frontend  |
+| `OKTA_ISSUER`    | `https://<your-okta-domain>/oauth2/default`        | Okta issuer URL — provided by your Okta admin      |
+| `AIUC_SECRET_NAME` | `<your-secret-name>` (e.g. `aiuc/okta`)          | AWS Secrets Manager secret name holding Okta credentials |
+
+> ⚠️ **Do not** set `VITE_OKTA_CLIENT_ID` or `VITE_OKTA_ISSUER` directly in Lambda. The client ID is now fetched securely from AWS Secrets Manager at runtime (see Step 3a below).
+
+---
+
+#### 3a. Okta Authentication Setup (AWS Secrets Manager)
+
+Okta credentials are **not hardcoded** in the frontend or Lambda environment. The `OKTA_CLIENT_ID` is stored in **AWS Secrets Manager** and fetched at runtime by the Lambda function, which then serves it to the frontend via the `/api/okta-config` endpoint.
+
+##### How it works
+
+```
+Browser → GET /api/okta-config
+         → Lambda reads OKTA_ISSUER from its env var
+         → Lambda reads AIUC_SECRET_NAME from its env var
+         → Lambda calls Secrets Manager → gets OKTA_CLIENT_ID
+         → Returns { issuer, clientId } to browser
+         → Browser initializes Okta with these values
+```
+
+##### Step 3a-1: Create the secret in AWS Secrets Manager
+
+1. Go to **AWS Console → Secrets Manager → Store a new secret**
+2. Choose **"Other type of secret"**
+3. Under **Key/value pairs**, add:
+
+   | Key              | Value                          |
+   | ---------------- | ------------------------------ |
+   | `OKTA_CLIENT_ID` | `<Okta Client ID from your Okta admin>` |
+
+4. Click **Next**
+5. Enter a **Secret name** — use the same value you'll set as `AIUC_SECRET_NAME` in Lambda (e.g. `aiuc/okta`)
+6. Leave rotation disabled → click **Next** → **Store**
+
+> ℹ️ The secret name you choose here is what goes into the Lambda env var `AIUC_SECRET_NAME`.
+
+##### Step 3a-2: Give Lambda permission to read the secret
+
+1. In Lambda Console → **Configuration** → **Permissions** → click the **Execution role name** (opens IAM in a new tab)
+2. Click **Add permissions** → **Create inline policy**
+3. Switch to the **JSON** tab and paste:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:<YOUR_REGION>:<YOUR_ACCOUNT_ID>:secret:<YOUR_SECRET_NAME>*"
+    }
+  ]
+}
+```
+
+> Replace `<YOUR_REGION>`, `<YOUR_ACCOUNT_ID>` (12-digit number, visible top-right in AWS Console), and `<YOUR_SECRET_NAME>` (e.g. `aiuc/okta`).
+
+4. Click **Next** → name it `aiuc-secrets-manager-read` → **Create policy**
+
+##### Step 3a-3: Verify
+
+Test the endpoint directly in your browser or with curl:
+
+```bash
+curl https://<your-lambda-url>.lambda-url.<region>.on.aws/api/okta-config
+```
+
+Expected response:
+```json
+{ "issuer": "https://yourcompany.okta.com/oauth2/default", "clientId": "0oaXXXXXXXX" }
+```
+
+If you see this, Okta is fully configured and the frontend will authenticate correctly.
+
+---
 
 #### 4️⃣ Configure Access
 
@@ -360,6 +439,8 @@ The Lambda execution role must have permission to read from your S3 bucket. With
 4. Replace `<YOUR-BUCKET-NAME>` with your actual bucket name (same as `BUCKET_NAME` env var).
 5. Click **Next** → enter a policy name (e.g. `S3ReadPolicy`) → **Create policy**.
 
+> ℹ️ The Secrets Manager permission is handled separately in **Step 3a-2** above. Both policies must be attached to the Lambda execution role.
+
 ##### Step 4b: Function URL — Choose one
 
 ###### Option A: IAM Authentication
@@ -383,9 +464,19 @@ The Lambda execution role must have permission to read from your S3 bucket. With
 
 ---
 
-#### 5️⃣ Deployment Complete
+#### 5️⃣ Deployment Checklist
 
-Click on the `Function URL` to access the deployed function.
+Before going live, confirm each item:
+
+- [ ] `dist/` built (`npm run build`) and uploaded to S3 under `dist/` folder
+- [ ] `use_cases.json` and `industry_use_cases.json` uploaded to S3 bucket root
+- [ ] Lambda code redeployed with updated `lambda.zip`
+- [ ] Lambda env vars set: `BUCKET_NAME`, `S3_REGION`, `DIST_PREFIX`, `OKTA_ISSUER`, `AIUC_SECRET_NAME`
+- [ ] Secret created in AWS Secrets Manager with key `OKTA_CLIENT_ID` (Step 3a-1)
+- [ ] Lambda IAM role has `S3ReadPolicy` inline policy (Step 4a)
+- [ ] Lambda IAM role has `aiuc-secrets-manager-read` inline policy (Step 3a-2)
+- [ ] `/api/okta-config` returns correct `issuer` and `clientId` (Step 3a-3)
+- [ ] Function URL configured with correct auth type (Step 4b)
 
 ```
 🔗 Lambda Function URL : https://xxxxx.lambda-url.your_lambda_region.on.aws/
@@ -464,7 +555,9 @@ aws s3 ls s3://aiuc/ --no-sign-request
 | **Tables**     | TanStack Table v8       | ![TanStack](https://img.shields.io/badge/TanStack-FF4154?style=flat-square&logo=reacttable&logoColor=white)  |
 | **Runtime**    | AWS Lambda (Node.js 20) | ![Lambda](https://img.shields.io/badge/Lambda-FF9900?style=flat-square&logo=awslambda&logoColor=white)       |
 | **Storage**    | Amazon S3 (Private)     | ![S3](https://img.shields.io/badge/S3-569A31?style=flat-square&logo=amazons3&logoColor=white)                |
-| **Auth**       | AWS IAM                 | ![IAM](https://img.shields.io/badge/IAM-DD344C?style=flat-square&logo=amazonaws&logoColor=white)             |
+| **Auth**       | Okta (OIDC / PKCE)      | ![Okta](https://img.shields.io/badge/Okta-007DC1?style=flat-square&logo=okta&logoColor=white)                |
+| **Access**     | AWS IAM                 | ![IAM](https://img.shields.io/badge/IAM-DD344C?style=flat-square&logo=amazonaws&logoColor=white)             |
+| **Secrets**    | AWS Secrets Manager     | ![SecretsManager](https://img.shields.io/badge/Secrets_Manager-DD344C?style=flat-square&logo=amazonaws&logoColor=white) |
 | **IaC**        | Manual / AWS Console    | ![Console](https://img.shields.io/badge/AWS-Console-FF9900?style=flat-square&logo=amazonaws&logoColor=white) |
 
 </p>

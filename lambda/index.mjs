@@ -1,10 +1,25 @@
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 import nodemailer from "nodemailer";
 
 const s3 = new S3Client({ region: process.env.S3_REGION });
+const secretsManager = new SecretsManagerClient({ region: process.env.S3_REGION });
 
-const BUCKET        = process.env.BUCKET_NAME;
-const DIST_PREFIX   = process.env.DIST_PREFIX;
+const BUCKET           = process.env.BUCKET_NAME;
+const DIST_PREFIX      = process.env.DIST_PREFIX;
+const OKTA_ISSUER      = process.env.OKTA_ISSUER || "";
+const AIUC_SECRET_NAME = process.env.AIUC_SECRET_NAME || "";
+
+let cachedOktaClientId = null;
+
+async function getOktaClientId() {
+    if (cachedOktaClientId) return cachedOktaClientId;
+    const command = new GetSecretValueCommand({ SecretId: AIUC_SECRET_NAME });
+    const response = await secretsManager.send(command);
+    const secret = JSON.parse(response.SecretString);
+    cachedOktaClientId = secret.OKTA_CLIENT_ID;
+    return cachedOktaClientId;
+}
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "aiuc@purestorage.com";
 const SMTP_HOST     = process.env.SMTP_HOST     || "";
 const SMTP_PORT     = process.env.SMTP_PORT     || "587";
@@ -97,6 +112,17 @@ export async function handler(event) {
     const method = event.requestContext?.http?.method || event.httpMethod || "GET";
 
     console.log(`[Request] ${method} ${path}`);
+
+    // ── Okta config API ────────────────────────────────────────────────────────
+    if (path === "/api/okta-config" || path === "/api/okta-config/") {
+        try {
+            const clientId = await getOktaClientId();
+            return json(200, { issuer: OKTA_ISSUER, clientId });
+        } catch (err) {
+            console.error("Failed to fetch Okta config from Secrets Manager:", err);
+            return json(500, { error: "Failed to load authentication configuration" });
+        }
+    }
 
     // ── Data API ───────────────────────────────────────────────────────────────
     if (path === "/api/data/use-cases" || path === "/api/data/use-cases/") {

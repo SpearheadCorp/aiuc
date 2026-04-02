@@ -1,14 +1,18 @@
 import { OktaAuth } from "@okta/okta-auth-js";
 
-const OKTA_ISSUER = import.meta.env.VITE_OKTA_ISSUER || "";
-const OKTA_CLIENT_ID = import.meta.env.VITE_OKTA_CLIENT_ID || "";
-const REDIRECT_URI = `${window.location.origin}/login/callback`;
+export async function createOktaAuth(): Promise<OktaAuth> {
+    const response = await fetch("/api/okta-config");
+    if (!response.ok) {
+        throw new Error("Failed to load authentication configuration");
+    }
+    const { issuer, clientId } = await response.json();
 
-export const oktaAuth = new OktaAuth({
-    issuer: OKTA_ISSUER,
-    clientId: OKTA_CLIENT_ID,
-    redirectUri: REDIRECT_URI,
-    scopes: ["openid", "profile", "email"],
-    pkce: true,
-    restoreOriginalUri: undefined,
-});
+    return new OktaAuth({
+        issuer,
+        clientId,
+        redirectUri: `${window.location.origin}/login/callback`,
+        scopes: ["openid", "profile", "email"],
+        pkce: true,
+        restoreOriginalUri: undefined,
+    });
+}

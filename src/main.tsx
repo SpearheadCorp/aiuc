@@ -1,9 +1,9 @@
-import { StrictMode, useEffect } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { Security, LoginCallback, useOktaAuth } from "@okta/okta-react";
-import { toRelativeUrl } from "@okta/okta-auth-js";
-import { oktaAuth } from "./config/okta";
+import { toRelativeUrl, OktaAuth } from "@okta/okta-auth-js";
+import { createOktaAuth } from "./config/okta";
 import App from "./App.tsx";
 import "./globals.css";
 
@@ -23,7 +23,7 @@ function RequiredAuth({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
 }
 
-function AppWithOkta() {
+function AppWithOkta({ oktaAuth }: { oktaAuth: OktaAuth }) {
     const navigate = useNavigate();
 
     const restoreOriginalUri = async (
@@ -43,10 +43,31 @@ function AppWithOkta() {
     );
 }
 
+function Root() {
+    const [oktaAuth, setOktaAuth] = useState<OktaAuth | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        createOktaAuth()
+            .then(setOktaAuth)
+            .catch((err) => {
+                console.error("Failed to initialize Okta:", err);
+                setError("Failed to load authentication configuration. Please try again later.");
+            });
+    }, []);
+
+    if (error) return <div>{error}</div>;
+    if (!oktaAuth) return null;
+
+    return (
+        <BrowserRouter>
+            <AppWithOkta oktaAuth={oktaAuth} />
+        </BrowserRouter>
+    );
+}
+
 createRoot(document.getElementById("root")!).render(
     <StrictMode>
-        <BrowserRouter>
-            <AppWithOkta />
-        </BrowserRouter>
+        <Root />
     </StrictMode>
 );
