@@ -1,60 +1,124 @@
 # AIUC – Deployment Configuration Guide
 
+> This document covers **all configuration decisions** needed to deploy the AIUC app.
+> For full step-by-step AWS setup instructions (creating S3 bucket, Lambda, IAM roles, etc.) refer to **README.md**.
+
+---
+
 ## Repository
 
-The latest code has been pushed to GitHub.
-**Branch:** `feature/okta-auth-ui-enhancements`
-Please pull this branch for deployment.
+**GitHub:** `https://github.com/SpearheadCorp/aiuc`
+**Branch to deploy:** `feature/okta-auth-ui-enhancements`
 
-## Application URL (Current Test Deployment)
-
-https://i55277glxwyi6tmhik5dzvdaiu0czjsa.lambda-url.us-east-2.on.aws/
+```bash
+git clone https://github.com/SpearheadCorp/aiuc.git
+cd aiuc
+git checkout feature/okta-auth-ui-enhancements
+```
 
 ---
 
-## 1. Frontend Configuration (Vite Environment Variables)
+## Current Test Deployment
 
-**Where to configure:** In the root of the project, create or edit a file named `.env` (or set these as build environment variables in your CI/CD pipeline such as GitHub Actions secrets).
+| Item | Value |
+|------|-------|
+| Lambda Function URL | `https://i55277glxwyi6tmhik5dzvdaiu0czjsa.lambda-url.us-east-2.on.aws/` |
+| S3 Bucket | `auic` |
+| AWS Region | `us-east-2` |
+| Lambda Function Name | `dev-aiuc-frontend` |
 
-| Variable | Description | Example |
-|---|---|---|
-| `VITE_CONTACT_EMAIL` | Contact email displayed in the UI | `aiuc@purestorage.com` |
-| `VITE_EMAIL_TOOLTIP_TEXT` | Tooltip text shown when hovering over contact icon | `I'm interested — contact me` |
+---
 
-> ⚠️ **`VITE_OKTA_ISSUER` and `VITE_OKTA_CLIENT_ID` are no longer set in the frontend `.env`.**
-> Okta credentials are now fetched securely at runtime from **AWS Secrets Manager** via the Lambda `/api/okta-config` endpoint. See Section 2a below.
+## Section 1 — Frontend Build Variables (`.env`)
 
-**Example `.env` file:**
-```
+These are **build-time only** — they get baked into the compiled frontend during `npm run build`. They are **not** set in the Lambda console.
+
+Create a `.env` file in the project root (or set them as GitHub Actions secrets for CI/CD):
+
+```env
+# Contact form display
 VITE_CONTACT_EMAIL=aiuc@purestorage.com
 VITE_EMAIL_TOOLTIP_TEXT=I'm interested — contact me
+
+# Only needed when deploying at a sub-path (e.g. behind an ALB at /app/aiuc)
+# Leave this out for standard Lambda Function URL deployment at root /
+# VITE_BASE_PATH=/app/aiuc
 ```
 
-> These values are baked into the frontend build. After changing them, run `npm run build` and re-deploy the `dist/` folder to S3.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VITE_CONTACT_EMAIL` | No | Contact email shown in the UI footer. Defaults to `aiuc@purestorage.com` |
+| `VITE_EMAIL_TOOLTIP_TEXT` | No | Tooltip on the contact icon. Defaults to `I'm interested — contact me` |
+| `VITE_BASE_PATH` | No | Base URL path prefix for asset URLs. Only set when app is deployed at a sub-path (see Section 5). Leave **unset** for standard deployment |
+
+> After changing any `.env` value, you must run `npm run build` again and re-upload `dist/` to S3.
+
+> `VITE_OKTA_ISSUER` and `VITE_OKTA_CLIENT_ID` are **not used** in the frontend `.env`. Okta credentials are fetched securely at runtime from AWS Secrets Manager via `/api/okta-config`.
 
 ---
 
-## 2. Backend Configuration (AWS Lambda Environment Variables)
+## Section 2 — Lambda Environment Variables
 
-**Where to configure:**
-1. Open the [AWS Lambda Console](https://console.aws.amazon.com/lambda/)
-2. Select the function (e.g., `dev-aiuc-frontend`)
-3. Go to **Configuration** → **Environment variables** → **Edit**
-4. Add or update the following keys:
+Set these in **AWS Lambda Console → Configuration → Environment variables → Edit**.
 
-| Variable | Description | Example |
-|---|---|---|
-| `BUCKET_NAME` | S3 bucket storing frontend assets and JSON data | `aiuc-data-bucket` |
-| `S3_REGION` | AWS region of the S3 bucket and Secrets Manager | `us-east-2` |
-| `DIST_PREFIX` | Folder containing built frontend assets | `dist` |
-| `OKTA_ISSUER` | Okta issuer URL — read from this env var at runtime | `https://yourcompany.okta.com/oauth2/default` |
-| `AIUC_SECRET_NAME` | AWS Secrets Manager secret name holding Okta credentials | `aiuc/okta` |
+### 2a. Core Variables (Required)
+
+| Key | Value | Description |
+|-----|-------|-------------|
+| `BUCKET_NAME` | `auic` | S3 bucket name storing frontend assets and JSON data |
+| `S3_REGION` | `us-east-2` | AWS region of your S3 bucket and Secrets Manager |
+| `DIST_PREFIX` | `dist` | Folder inside S3 bucket containing the built React app |
+
+### 2b. Okta Authentication (Required)
+
+| Key | Value | Description |
+|-----|-------|-------------|
+| `OKTA_ISSUER` | `https://yourcompany.okta.com/oauth2/default` | Okta issuer URL — get from your Okta admin |
+| `AIUC_SECRET_NAME` | `aiuc/okta` | AWS Secrets Manager secret name holding `OKTA_CLIENT_ID` |
+
+> `OKTA_CLIENT_ID` is **not** set here — it lives in Secrets Manager. See Section 3.
+
+### 2c. Email / Contact Form (Required for contact form to work)
+
+| Key | Value | Description |
+|-----|-------|-------------|
+| `CONTACT_EMAIL` | `aiuc@purestorage.com` | Destination address for contact form submissions |
+| `SMTP_HOST` | `smtp.gmail.com` | SMTP server hostname |
+| `SMTP_PORT` | `587` | SMTP port (587 for TLS) |
+| `SMTP_USER` | `sender@gmail.com` | SMTP login username |
+| `SMTP_PASS` | `your_app_password` | SMTP password or app-specific password |
+| `SMTP_FROM` | `sender@gmail.com` | From address on outgoing emails (defaults to `SMTP_USER` if unset) |
+
+> For Gmail: use an **App Password** (not your main Gmail password). Generate one at Google Account → Security → 2-Step Verification → App passwords.
+
+### 2d. Optional Variables
+
+| Key | Value | Description |
+|-----|-------|-------------|
+| `BASE_PATH` | `/app/aiuc` | **Only set this** when deploying behind an ALB or reverse proxy at a sub-path. Leave **unset** for standard Lambda Function URL deployment at root `/`. See Section 5. |
+
+### Complete Environment Variables Reference Table
+
+| Key | Example | Required | Notes |
+|-----|---------|----------|-------|
+| `BUCKET_NAME` | `auic` | Yes | |
+| `S3_REGION` | `us-east-2` | Yes | |
+| `DIST_PREFIX` | `dist` | Yes | Always set to `dist` |
+| `OKTA_ISSUER` | `https://company.okta.com/oauth2/default` | Yes | |
+| `AIUC_SECRET_NAME` | `aiuc/okta` | Yes | Must match secret name in Secrets Manager |
+| `CONTACT_EMAIL` | `aiuc@purestorage.com` | Yes | |
+| `SMTP_HOST` | `smtp.gmail.com` | Yes | |
+| `SMTP_PORT` | `587` | Yes | |
+| `SMTP_USER` | `sender@gmail.com` | Yes | |
+| `SMTP_PASS` | `app_password` | Yes | |
+| `SMTP_FROM` | `sender@gmail.com` | No | Defaults to `SMTP_USER` |
+| `BASE_PATH` | `/app/aiuc` | No | Only for sub-path deployments |
 
 ---
 
-## 2a. Okta Authentication — AWS Secrets Manager Setup
+## Section 3 — Okta Authentication (AWS Secrets Manager)
 
-Okta credentials are **not stored in environment variables or frontend code**. The `OKTA_CLIENT_ID` is stored in AWS Secrets Manager and fetched by Lambda at runtime.
+The `OKTA_CLIENT_ID` is **never hardcoded** in code or Lambda env vars. It is stored in AWS Secrets Manager and fetched at runtime.
 
 ### How it works
 
@@ -62,30 +126,28 @@ Okta credentials are **not stored in environment variables or frontend code**. T
 Browser  →  GET /api/okta-config
          →  Lambda reads OKTA_ISSUER from env var
          →  Lambda reads AIUC_SECRET_NAME from env var
-         →  Lambda fetches secret from AWS Secrets Manager
-         →  Returns { issuer, clientId } to the browser
-         →  Browser initializes Okta SDK with these values
+         →  Lambda calls Secrets Manager → gets OKTA_CLIENT_ID
+         →  Returns { issuer, clientId } to browser
+         →  Browser initializes Okta SDK
 ```
 
-### Step 1 — Create the secret in AWS Secrets Manager
+### Step 1 — Create the secret
 
-1. Go to **AWS Console → Secrets Manager → Store a new secret**
-2. Select **"Other type of secret"**
-3. Add the following key/value pair:
+1. AWS Console → **Secrets Manager** → **Store a new secret**
+2. Choose **Other type of secret**
+3. Add key/value:
 
    | Key | Value |
-   |---|---|
-   | `OKTA_CLIENT_ID` | `<Okta Client ID — provided by your Okta admin>` |
+   |-----|-------|
+   | `OKTA_CLIENT_ID` | Your Okta Client ID from your Okta admin |
 
-4. Click **Next**
-5. Set the **Secret name** to match what you will use for `AIUC_SECRET_NAME` (e.g. `aiuc/okta`)
-6. Leave rotation disabled → click **Next** → **Store**
+4. Click **Next** → set **Secret name** to `aiuc/okta` (this must match `AIUC_SECRET_NAME` in Lambda)
+5. Leave rotation disabled → **Next** → **Store**
 
-### Step 2 — Add IAM permission to Lambda execution role
+### Step 2 — Grant Lambda permission to read the secret
 
-1. In Lambda Console → **Configuration** → **Permissions** → click the **Execution role name** (opens IAM)
-2. Click **Add permissions** → **Create inline policy**
-3. Switch to **JSON** tab and paste:
+1. Lambda Console → **Configuration** → **Permissions** → click the **Execution role** link
+2. **Add permissions** → **Create inline policy** → **JSON** tab:
 
 ```json
 {
@@ -94,88 +156,239 @@ Browser  →  GET /api/okta-config
     {
       "Effect": "Allow",
       "Action": "secretsmanager:GetSecretValue",
-      "Resource": "arn:aws:secretsmanager:<YOUR_REGION>:<YOUR_ACCOUNT_ID>:secret:<YOUR_SECRET_NAME>*"
+      "Resource": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:aiuc/okta*"
     }
   ]
 }
 ```
 
-Replace:
-- `<YOUR_REGION>` → e.g. `us-east-2`
-- `<YOUR_ACCOUNT_ID>` → 12-digit number visible in top-right of AWS Console
-- `<YOUR_SECRET_NAME>` → e.g. `aiuc/okta`
+Replace `REGION` and `ACCOUNT_ID` (12-digit number shown top-right in AWS Console).
 
-4. Name the policy `aiuc-secrets-manager-read` → **Create policy**
+3. Name it `aiuc-secrets-manager-read` → **Create policy**
 
 ### Step 3 — Verify
 
 ```bash
-curl https://<your-lambda-url>.lambda-url.<region>.on.aws/api/okta-config
+curl https://YOUR_LAMBDA_URL.lambda-url.us-east-2.on.aws/api/okta-config
 ```
 
-Expected response:
+Expected:
 ```json
 { "issuer": "https://yourcompany.okta.com/oauth2/default", "clientId": "0oaXXXXXXXX" }
 ```
 
 ---
 
-## 3. Email / SMTP Configuration
+## Section 4 — S3 Bucket Structure
 
-**Where to configure:** Same place as Section 2 — AWS Lambda Console → **Configuration** → **Environment variables**.
-
-Email functionality is fully implemented. The current **503 error** occurs because SMTP credentials have not been configured yet. No code changes are needed — only these environment variables need to be set.
-
-| Variable | Description | Example |
-|---|---|---|
-| `CONTACT_EMAIL` | Destination email address for contact form submissions | `aiuc@purestorage.com` |
-| `SMTP_HOST` | SMTP server hostname | `smtp.office365.com` or `smtp.gmail.com` |
-| `SMTP_PORT` | SMTP port | `587` |
-| `SMTP_USER` | SMTP username or email account used for sending | `noreply@yourcompany.com` |
-| `SMTP_PASS` | SMTP password or app password | _(keep secure)_ |
-| `SMTP_FROM` | Sender address shown on outbound emails | `noreply@yourcompany.com` |
-
-> **Action required from client:** Please share which email account will be used for outbound system emails (e.g., a no-reply address) along with the SMTP credentials. Timur can then add these directly in the Lambda console — no code deployment needed.
-
----
-
-## 4. S3 Data Files
-
-**Where to configure:** [AWS S3 Console](https://console.aws.amazon.com/s3/) → select your bucket → upload files to the **bucket root**.
-
-The following JSON data files are **not stored in the repository** and must be uploaded directly to S3:
-
-| File | S3 Location | Purpose |
-|---|---|---|
-| `use_cases.json` | `s3://your-bucket/use_cases.json` | AI use case data for the main table |
-| `industry_use_cases.json` | `s3://your-bucket/industry_use_cases.json` | Industry-specific AI implementation data |
-
-**Expected bucket structure:**
 ```
-your-bucket/
-├── dist/
+auic/  (your bucket)
+├── dist/                        ← upload: aws s3 sync dist/ s3://auic/dist/
 │   ├── index.html
-│   ├── assets/
-│   └── ...
-├── use_cases.json          ← upload here
-└── industry_use_cases.json ← upload here
+│   └── assets/
+│       ├── index-xxxxx.js
+│       ├── index-xxxxx.css
+│       └── (images, fonts, etc.)
+├── use_cases.json               ← upload to bucket ROOT (not inside dist/)
+└── industry_use_cases.json      ← upload to bucket ROOT (not inside dist/)
+```
+
+### Uploading data files
+
+Upload via S3 Console (drag and drop to bucket root) or via CLI:
+
+```bash
+aws s3 cp use_cases.json s3://auic/use_cases.json
+aws s3 cp industry_use_cases.json s3://auic/industry_use_cases.json
+```
+
+**Data file format:**
+
+`use_cases.json` — array of use case objects:
+```json
+[
+  { "capability": 1, "business_function": "Finance", "ai_use_case": "...", ... }
+]
+```
+
+`industry_use_cases.json` — array of industry objects:
+```json
+[
+  { "id": "1", "industry": "Healthcare", "ai_use_case": "...", ... }
+]
+```
+
+Place `[]` in each file if you have no data yet — the app will load with empty tables.
+
+---
+
+## Section 5 — Sub-Path Deployment (ALB / Reverse Proxy)
+
+**Only follow this section if your organisation deploys the app at a sub-path** (e.g. `/app/aiuc`) behind an internal ALB or portal, not at the root `/`.
+
+For standard Lambda Function URL deployment, **skip this section entirely**.
+
+### What changes and why
+
+| Without sub-path | With sub-path (`/app/aiuc`) |
+|-----------------|----------------------------|
+| App at root `/` | App at `/app/aiuc` |
+| Assets at `/assets/file.js` | Assets at `/app/aiuc/assets/file.js` |
+| Lambda receives `/assets/file.js` | Lambda receives `/app/aiuc/assets/file.js` |
+| No stripping needed | Must strip `/app/aiuc` prefix before S3 lookup |
+
+### Step 1 — Build with base path
+
+```bash
+VITE_BASE_PATH=/app/aiuc npm run build
+```
+
+This makes Vite prefix all asset URLs in the HTML output with `/app/aiuc/`.
+
+### Step 2 — Add BASE_PATH to Lambda
+
+In Lambda Console → **Configuration** → **Environment variables** → **Edit** → add:
+
+| Key | Value |
+|-----|-------|
+| `BASE_PATH` | `/app/aiuc` |
+
+The Lambda handler strips this prefix from every incoming request path before looking up the file in S3.
+
+### Step 3 — Upload dist/ as normal
+
+```bash
+aws s3 sync dist/ s3://YOUR_BUCKET/dist/ --delete
+```
+
+No change to S3 structure — the stripping happens at runtime in Lambda, not in S3.
+
+---
+
+## Section 6 — Build & Deploy Commands
+
+### Standard deployment (root `/`)
+
+```bash
+# 1. Install dependencies
+npm install --legacy-peer-deps
+
+# 2. Build frontend
+npm run build
+
+# 3. Upload dist to S3
+aws s3 sync dist/ s3://auic/dist/ --delete
+
+# 4. Package Lambda
+cd lambda
+npm install --omit=dev
+zip -r ../lambda.zip .
+cd ..
+
+# 5. Deploy Lambda
+aws lambda update-function-code \
+  --function-name dev-aiuc-frontend \
+  --zip-file fileb://lambda.zip
+```
+
+### Sub-path deployment (`/app/aiuc`)
+
+Same as above but replace step 2 with:
+
+```bash
+VITE_BASE_PATH=/app/aiuc npm run build
+```
+
+And also set `BASE_PATH=/app/aiuc` in Lambda environment variables.
+
+---
+
+## Section 7 — GitHub Actions (Automated CI/CD)
+
+Every push to `main` automatically runs the full build and deploy pipeline via `.github/workflows/deploy.yml`.
+
+### Required GitHub Secrets
+
+Go to repo → **Settings** → **Secrets and variables** → **Actions** → add:
+
+| Secret | Example | Description |
+|--------|---------|-------------|
+| `AWS_ACCESS_KEY_ID` | `AKIA...` | IAM user access key ID |
+| `AWS_SECRET_ACCESS_KEY` | `wJal...` | IAM user secret access key |
+| `AWS_REGION` | `us-east-2` | AWS region |
+| `S3_BUCKET_NAME` | `auic` | S3 bucket name |
+| `LAMBDA_FUNCTION_NAME` | `dev-aiuc-frontend` | Lambda function name |
+
+---
+
+## Section 8 — IAM Policies Summary
+
+Two inline policies must be attached to the Lambda execution role:
+
+### Policy 1 — S3 Read Access (`aiuc-s3-read`)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:ListBucket"],
+      "Resource": [
+        "arn:aws:s3:::auic",
+        "arn:aws:s3:::auic/*"
+      ]
+    }
+  ]
+}
+```
+
+### Policy 2 — Secrets Manager Read (`aiuc-secrets-manager-read`)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:us-east-2:ACCOUNT_ID:secret:aiuc/okta*"
+    }
+  ]
+}
 ```
 
 ---
 
-## 5. Deployment Checklist
+## Section 9 — Deployment Checklist
 
-- [ ] Pull repository branch: `feature/okta-auth-ui-enhancements`
-- [ ] Create `.env` file with frontend variables (Section 1) and run `npm run build`
-- [ ] Upload `dist/` folder contents to S3 bucket
-- [ ] Upload `use_cases.json` and `industry_use_cases.json` to S3 bucket root (Section 4)
-- [ ] In Lambda Console → set backend environment variables (Section 2): `BUCKET_NAME`, `S3_REGION`, `DIST_PREFIX`, `OKTA_ISSUER`, `AIUC_SECRET_NAME`
-- [ ] Create secret in AWS Secrets Manager with key `OKTA_CLIENT_ID` (Section 2a — Step 1)
-- [ ] Add `aiuc-secrets-manager-read` inline policy to Lambda execution role (Section 2a — Step 2)
-- [ ] Verify `/api/okta-config` returns correct `issuer` and `clientId` (Section 2a — Step 3)
-- [ ] In Lambda Console → add SMTP credentials (Section 3) once email account is confirmed
-- [ ] Test the application via the Lambda Function URL
-- [ ] Test contact form email functionality
+### First-time setup
+
+- [ ] S3 bucket created with **Block all public access** enabled
+- [ ] Lambda function created with **Node.js 20.x**, timeout set to **60 seconds**
+- [ ] `aiuc-s3-read` inline policy attached to Lambda execution role (Section 8)
+- [ ] Secret `aiuc/okta` created in Secrets Manager with key `OKTA_CLIENT_ID` (Section 3 — Step 1)
+- [ ] `aiuc-secrets-manager-read` inline policy attached to Lambda execution role (Section 3 — Step 2)
+- [ ] Lambda Function URL configured (Auth type: `NONE` for public, `AWS_IAM` for restricted)
+- [ ] All Lambda environment variables set (Section 2)
+
+### Every deployment
+
+- [ ] `npm run build` run successfully (with `VITE_BASE_PATH` if sub-path deployment)
+- [ ] `dist/` uploaded to `s3://auic/dist/` via `aws s3 sync`
+- [ ] `use_cases.json` present at S3 bucket root
+- [ ] `industry_use_cases.json` present at S3 bucket root
+- [ ] `lambda.zip` packaged from `lambda/` folder
+- [ ] `lambda.zip` uploaded to Lambda function
+
+### Verification after deployment
+
+- [ ] `GET /api/okta-config` returns correct `issuer` and `clientId`
+- [ ] `GET /api/data/use-cases` returns JSON array
+- [ ] `GET /api/data/industry` returns JSON array
+- [ ] App loads in browser and Okta login works
+- [ ] Contact form sends email successfully
+- [ ] Direct S3 URL returns `AccessDenied`
 
 ---
 

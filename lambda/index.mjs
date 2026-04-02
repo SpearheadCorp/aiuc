@@ -9,6 +9,7 @@ const BUCKET           = process.env.BUCKET_NAME;
 const DIST_PREFIX      = process.env.DIST_PREFIX;
 const OKTA_ISSUER      = process.env.OKTA_ISSUER || "";
 const AIUC_SECRET_NAME = process.env.AIUC_SECRET_NAME || "";
+const BASE_PATH        = (process.env.BASE_PATH || "").replace(/\/$/, "");
 
 let cachedOktaClientId = null;
 
@@ -108,10 +109,13 @@ function json(statusCode, data) {
 }
 
 export async function handler(event) {
-    const path   = event.rawPath || event.path || "/";
-    const method = event.requestContext?.http?.method || event.httpMethod || "GET";
+    const rawPath = event.rawPath || event.path || "/";
+    const method  = event.requestContext?.http?.method || event.httpMethod || "GET";
+    const path    = BASE_PATH && rawPath.startsWith(BASE_PATH)
+                    ? rawPath.slice(BASE_PATH.length) || "/"
+                    : rawPath;
 
-    console.log(`[Request] ${method} ${path}`);
+    console.log(`[Request] ${method} ${rawPath} → ${path}`);
 
     // ── Okta config API ────────────────────────────────────────────────────────
     if (path === "/api/okta-config" || path === "/api/okta-config/") {

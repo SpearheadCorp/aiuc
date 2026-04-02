@@ -1,4 +1,6 @@
 import { useState } from "react";
+import pureLogoImg from "./assets/purelogo.png";
+import spearheadImg from "./assets/spearhead.png";
 import {
   Box,
   Typography,
@@ -55,7 +57,7 @@ function App() {
           <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <Logo
-                src="/assets/purelogo.png"
+                src={pureLogoImg}
                 alt="Pure Storage"
                 width={300}
                 height={60}
@@ -145,7 +147,7 @@ function App() {
             <Typography variant="body2" sx={{ color: "#666666", fontSize: "0.75rem" }}>
               Powered by
             </Typography>
-            <Logo src="/assets/spearhead.png" alt="Spearhead" width={100} height={50} fallbackText="" />
+            <Logo src={spearheadImg} alt="Spearhead" width={100} height={50} fallbackText="" />
           </Box>
 
           <Box sx={{ flex: 1, display: "flex", justifyContent: "center", gap: 3, alignItems: "center" }}>

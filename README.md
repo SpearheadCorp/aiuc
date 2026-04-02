@@ -2,158 +2,102 @@
   <img src="public/assets/purelogo.png" alt="Pure Storage" width="300" />
 </p>
 
-<h1 align="center">AI Use Case Repository</h1>
+<h1 align="center">AI Use Case Repository (AIUC)</h1>
 
 <p align="center">
-  <strong>Internal AI use case & industry data dashboard — secured with AWS IAM</strong>
+  <strong>Internal AI use case &amp; industry data dashboard — secured with Okta + AWS IAM</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/React-19.2-61DAFB?style=for-the-badge&logo=react&logoColor=white" alt="React" />
-  <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Vite-7.3-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
-  <img src="https://img.shields.io/badge/MUI-5.18-007FFF?style=for-the-badge&logo=mui&logoColor=white" alt="MUI" />
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/AWS_Lambda-FF9900?style=for-the-badge&logo=awslambda&logoColor=white" alt="AWS Lambda" />
-  <img src="https://img.shields.io/badge/Amazon_S3-569A31?style=for-the-badge&logo=amazons3&logoColor=white" alt="Amazon S3" />
-  <img src="https://img.shields.io/badge/AWS_IAM-DD344C?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS IAM" />
-  <img src="https://img.shields.io/badge/AWS_Secrets_Manager-DD344C?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS Secrets Manager" />
-  <img src="https://img.shields.io/badge/Okta-007DC1?style=for-the-badge&logo=okta&logoColor=white" alt="Okta" />
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/License-Proprietary-red?style=flat-square" alt="License" />
-  <img src="https://img.shields.io/badge/Status-Internal-orange?style=flat-square" alt="Status" />
-  <img src="https://img.shields.io/badge/Access-IAM_Authenticated-green?style=flat-square" alt="Access" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=white" />
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
+  <img src="https://img.shields.io/badge/Vite-7-646CFF?style=for-the-badge&logo=vite&logoColor=white" />
+  <img src="https://img.shields.io/badge/AWS_Lambda-FF9900?style=for-the-badge&logo=awslambda&logoColor=white" />
+  <img src="https://img.shields.io/badge/Amazon_S3-569A31?style=for-the-badge&logo=amazons3&logoColor=white" />
+  <img src="https://img.shields.io/badge/Okta-007DC1?style=for-the-badge&logo=okta&logoColor=white" />
 </p>
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
-- [Project Structure](#project-structure)
 - [Prerequisites](#prerequisites)
 - [Local Development](#local-development)
+- [One-Time AWS Setup](#one-time-aws-setup)
+  - [Step 1 — Create S3 Bucket](#step-1--create-s3-bucket)
+  - [Step 2 — Create Lambda Function](#step-2--create-lambda-function)
+  - [Step 3 — Configure Okta (AWS Secrets Manager)](#step-3--configure-okta-aws-secrets-manager)
+  - [Step 4 — Attach IAM Policies to Lambda](#step-4--attach-iam-policies-to-lambda)
+  - [Step 5 — Configure Lambda Function URL](#step-5--configure-lambda-function-url)
 - [Deployment](#deployment)
-  - [Step 3a: Okta Authentication via AWS Secrets Manager](#3a-okta-authentication-setup-aws-secrets-manager)
+  - [Option A — Manual Deployment](#option-a--manual-deployment)
+  - [Option B — GitHub Actions (Automated)](#option-b--github-actions-automated)
+- [Lambda Environment Variables](#lambda-environment-variables)
+- [Sub-Path Deployment (ALB / Reverse Proxy)](#sub-path-deployment-alb--reverse-proxy)
+- [S3 Bucket Structure](#s3-bucket-structure)
 - [Granting User Access](#granting-user-access)
-- [Testing Access](#testing-access)
-- [Tech Stack](#tech-stack)
+- [Testing the Deployment](#testing-the-deployment)
+- [Deployment Checklist](#deployment-checklist)
 
 ---
 
 ## Overview
 
-The **AI Use Case Repository** is an internal dashboard that surfaces AI use case data and industry-specific AI implementation records. The frontend is a React SPA served through an **AWS Lambda Function URL** with **IAM authentication**, ensuring only authorized personnel can access the application and its data.
+The **AI Use Case Repository** is an internal React dashboard that surfaces AI use case data and industry-specific AI implementation records. It is served through an **AWS Lambda Function URL** and secured with **Okta OIDC authentication**. All data is stored in a private **Amazon S3** bucket — users never access S3 directly.
 
-> **🔒 Confidential — Internal Use Only**
+> **Confidential — Internal Use Only**
 
 ---
 
 ## Architecture
 
-```mermaid
-graph TD
-    subgraph Access["🔐 Access Layer"]
-        User["👤 IAM User / Role"]
-    end
-
-    subgraph Lambda["⚡ Compute Layer"]
-        FnURL["Lambda Function URL\n(AuthType: AWS_IAM)"]
-        Handler["Lambda Function\n(aiuc-frontend)"]
-        Static["📄 Static Server\n/ → dist/*"]
-        API["📊 Data API\n/api/data/*"]
-    end
-
-    subgraph S3["☁️ Storage Layer (Private)"]
-        Assets["📁 dist/\nindex.html, assets/, ..."]
-        Data["📄 JSON Data\nuse_cases.json\nindustry_use_cases.json"]
-    end
-
-    User -->|"SigV4 Signed\nHTTP Request"| FnURL
-    FnURL --> Handler
-    Handler --> Static
-    Handler --> API
-    Static -->|"s3:GetObject\n(Execution Role)"| Assets
-    API -->|"s3:GetObject\n(Execution Role)"| Data
-
-    style Access fill:#1a1a2e,stroke:#e94560,color:#fff
-    style Lambda fill:#16213e,stroke:#0f3460,color:#fff
-    style S3 fill:#0f3460,stroke:#533483,color:#fff
-    style User fill:#e94560,stroke:#e94560,color:#fff
-    style FnURL fill:#f5a623,stroke:#f5a623,color:#000
-    style Handler fill:#4ecdc4,stroke:#4ecdc4,color:#000
-    style Static fill:#45b7d1,stroke:#45b7d1,color:#000
-    style API fill:#45b7d1,stroke:#45b7d1,color:#000
-    style Assets fill:#96ceb4,stroke:#96ceb4,color:#000
-    style Data fill:#96ceb4,stroke:#96ceb4,color:#000
+```
+Browser (Okta login)
+    │
+    ▼
+Lambda Function URL  ──►  AWS Lambda (Node.js 20)
+                               │
+                    ┌──────────┴──────────┐
+                    ▼                     ▼
+             Static files           Data & Config APIs
+          (dist/ from S3)      /api/data/use-cases
+                                /api/data/industry
+                                /api/okta-config
+                                /api/contact
+                    │
+                    ▼
+            S3 Bucket (private)
+            ├── dist/           ← built React app
+            ├── use_cases.json
+            └── industry_use_cases.json
 ```
 
-> ❌ Direct S3 access → **BLOCKED** (PublicAccessBlock enabled)
-> ❌ Unsigned Lambda URL request → **403 Forbidden**
-> ✅ Signed request + IAM policy → **Full app access**
-
-### How It Works
-
-| Step  | Description                                                                                  |
-| ----- | -------------------------------------------------------------------------------------------- |
-| **1** | Authorized user sends a **SigV4-signed** HTTP request to the Lambda Function URL             |
-| **2** | AWS validates the signature and checks `lambda:InvokeFunctionUrl` permission                 |
-| **3** | Lambda receives the request and determines if it's a static asset or data API call           |
-| **4** | Lambda fetches the requested content from the **private S3 bucket** using its execution role |
-| **5** | Response is returned to the user — the website loads with all data                           |
-
-> Users **never access S3 directly**. The Lambda acts as a secure proxy.
-
----
-
-## Project Structure
-
-```
-aiuc.spearehead/
-├── src/                        # React frontend source
-│   ├── App.tsx                 # Main application component
-│   ├── components/             # UI components (tables, logo)
-│   ├── hooks/
-│   │   └── useS3Data.ts        # Data fetching via /api/data/*
-│   ├── theme.ts                # MUI theme configuration
-│   ├── types.ts                # TypeScript interfaces
-│   └── globals.css             # Global styles
-├── lambda/
-│   ├── index.mjs               # Lambda handler (serves FE + data API)
-│   └── package.json            # Lambda dependencies (@aws-sdk/client-s3)
-├── package.json                # Frontend dependencies
-├── vite.config.ts              # Vite configuration
-└── .env                        # Environment variables (S3_REGION, BUCKET_NAME)
-```
+- **Lambda** acts as a secure proxy — it reads from S3 using its IAM execution role
+- **Okta credentials** are stored in AWS Secrets Manager, never hardcoded
+- **No direct S3 access** — bucket blocks all public access
 
 ---
 
 ## Prerequisites
 
-Before deploying, ensure you have the following installed:
-
-| Tool            | Version | Purpose                       |
-| --------------- | ------- | ----------------------------- |
-| **Node.js**     | ≥ 18.x  | Build the frontend            |
-| **npm**         | ≥ 9.x   | Package management            |
-| **AWS Account** | N/A     | Access to Lambda, S3, and IAM |
+| Tool | Version | Purpose |
+|------|---------|---------|
+| Node.js | ≥ 18.x | Build the frontend |
+| npm | ≥ 9.x | Package management |
+| AWS CLI | any | Deploy to AWS |
+| AWS Account | — | Lambda, S3, IAM, Secrets Manager |
 
 ```bash
 # Verify installations
 node --version
+npm --version
 aws --version
-sam --version
-```
 
-Configure AWS CLI with credentials that have admin/deploy permissions:
-
-```bash
+# Configure AWS CLI
 aws configure
+# Enter: Access Key ID, Secret Access Key, Region (e.g. us-east-2), output format (json)
 ```
 
 ---
@@ -164,217 +108,85 @@ aws configure
 # Install dependencies
 npm install --legacy-peer-deps
 
-# Start development server
+# Start dev server (proxies /api to localhost:3001)
 npm run dev
 
 # Build for production
 npm run build
 
-# Preview production build
+# Preview production build locally
 npm run preview
 ```
 
-> ⚠️ **Note:** In local dev, the `/api/data/*` routes won't work unless you set up a local proxy or temporarily revert to direct S3 fetch for development.
+> The `/api/*` routes won't return data in local dev unless you run the Lambda locally or point `VITE_API_BASE_URL` at your deployed Lambda URL.
 
 ---
 
-## Deployment
+## One-Time AWS Setup
 
-### Automated Deployment (GitHub Actions)
-
-The recommended way to deploy is through GitHub Actions. Pushing to the `main` branch will automatically build the frontend, sync assets to S3, and update the Lambda function.
-
-#### Setup (One-time)
-
-Add the following **Secrets** to your GitHub repository (`Settings` > `Secrets` > `Actions`):
-
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION` (e.g., `us-east-2`)
-- `S3_BUCKET_NAME` (e.g., `auic`)
-- `LAMBDA_FUNCTION_NAME` (e.g., `dev-aiuc-frontend`)
-
-### Deployment GUIDE MANUAL AWS (S3 + Lambda)
-
-This guide explains how to deploy the AIUC frontend using **AWS Lambda** and **S3**, even for non-developers. Follow each step carefully.
+Do these steps **once** when setting up a new environment. Skip any step if the resource already exists.
 
 ---
 
-#### 1️⃣ Build & Package the Project
+### Step 1 — Create S3 Bucket
 
-1. Open a terminal in the project folder.
-2. Install dependencies:
-
-```bash
-npm install
-```
-
-Run only if you found any vulnerabilities in that version
-
-```bash
-npm audit fix
-```
-
-3. Build the project: `npm run build`
-4. Package the Lambda function:
-
-```
-cd lambda
-npm install --omit=dev
-zip -r ../lambda.zip .
-cd ..
-```
-
-#### 1a. Create S3 Bucket (if you don't have one)
-
-1. Open the [S3 Console](https://console.aws.amazon.com/s3/) → **Create bucket**.
+1. Open [S3 Console](https://console.aws.amazon.com/s3/) → **Create bucket**
 2. Use these settings:
 
-| Option                  | Value / Selection                                        |
-| ----------------------- | -------------------------------------------------------- |
-| **Bucket name**         | Globally unique (e.g., `auic` or `aiuc-your-org`)        |
-| **AWS Region**          | Same as Lambda (e.g., `us-east-2`, `ap-southeast-2`)     |
-| **Object Ownership**    | **ACLs disabled** (recommended) – Bucket owner enforced  |
-| **Block Public Access** | **Block all public access** ✓ (all 4 checkboxes enabled) |
-| **Bucket Versioning**   | Disable (optional: enable for rollback)                  |
-| **Default encryption**  | SSE-S3 (recommended) or leave default                    |
-| **Advanced settings**   | Leave defaults                                           |
+| Setting | Value |
+|---------|-------|
+| Bucket name | Globally unique, e.g. `aiuc-yourorg` |
+| AWS Region | Same region you will use for Lambda (e.g. `us-east-2`) |
+| Object Ownership | ACLs disabled (Bucket owner enforced) |
+| Block Public Access | **Block all public access** — all 4 checkboxes ON |
+| Versioning | Disabled (or enable for rollback capability) |
+| Encryption | SSE-S3 (default) |
 
-3. Click **Create bucket**.
+3. Click **Create bucket**
 
-4. **(Optional)** Add CORS configuration — if you need cross-origin access (e.g., frontend on a different domain):
-   - Open your bucket → **Permissions** tab → **Cross-origin resource sharing (CORS)** → **Edit**
-   - Paste:
-
-```json
-[
-  {
-    "AllowedHeaders": ["*"],
-    "AllowedMethods": ["GET", "HEAD"],
-    "AllowedOrigins": ["*"],
-    "ExposeHeaders": [],
-    "MaxAgeSeconds": 3000
-  }
-]
-```
-
-- Click **Save changes**.
-
-> ⚠️ **Important:** Keep "Block all public access" enabled. The Lambda execution role will access the bucket via IAM — no public access is needed.
-> ℹ️ CORS is only needed if the browser will call S3 directly (e.g., presigned URLs). For this setup (Lambda serves everything), CORS is **not required**.
+> Public access must stay blocked. The Lambda execution role accesses S3 via IAM — no public access is needed.
 
 ---
 
-#### 2️⃣ Upload Static Files to S3
+### Step 2 — Create Lambda Function
 
-1. Open the S3 Console.
-2. Select your bucket (auic) or the one you created above.
-3. **Upload the built frontend** — upload the contents of your local `dist/` folder into a folder named `dist` in your bucket.
-4. **Upload data files** — upload these JSON files to the **bucket root** (same level as the `dist` folder):
+1. Open [Lambda Console](https://console.aws.amazon.com/lambda/) → **Create function**
+2. Choose **Author from scratch** with these settings:
 
-   | File                      | Location in bucket                         | Purpose                                  |
-   | ------------------------- | ------------------------------------------ | ---------------------------------------- |
-   | `use_cases.json`          | `s3://your-bucket/use_cases.json`          | AI use case data for the main table      |
-   | `industry_use_cases.json` | `s3://your-bucket/industry_use_cases.json` | Industry-specific AI implementation data |
+| Setting | Value |
+|---------|-------|
+| Function name | e.g. `aiuc-frontend` |
+| Runtime | **Node.js 20.x** |
+| Architecture | x86_64 |
+| Execution role | Create a new role with basic Lambda permissions |
 
-   Both files must be JSON arrays. The dashboard will load but show empty tables if these files are missing.
-
-   **Example structure** — each file is an array of objects:
-   - `use_cases.json`: `[{ "capability": 1, "business_function": "...", "ai_use_case": "...", ... }, ...]`
-   - `industry_use_cases.json`: `[{ "id": "1", "industry": "...", "ai_use_case": "...", ... }, ...]`
-
-   Place `[]` (empty array) in each file if you have no data yet; the app will run with empty tables.
-
-**Expected bucket structure after upload:**
-
-```
-your-bucket/
-├── dist/
-│   ├── index.html
-│   ├── assets/
-│   │   ├── index-xxx.js
-│   │   └── index-xxx.css
-│   └── ...
-├── use_cases.json          ← at bucket root
-└── industry_use_cases.json ← at bucket root
-```
-
-#### 2a. Create Lambda Function (if you don't have one)
-
-1. Open the [Lambda Console](https://console.aws.amazon.com/lambda/) → **Create function**.
-2. Choose **Author from scratch**.
-3. Use these settings:
-
-| Option             | Value / Selection                                   |
-| ------------------ | --------------------------------------------------- |
-| **Function name**  | e.g., `dev-aiuc-frontend` (or `aiuc-frontend`)      |
-| **Runtime**        | **Node.js 20.x**                                    |
-| **Architecture**   | **x86_64** (or arm64 for lower cost)                |
-| **Execution role** | **Create a new role with basic Lambda permissions** |
-| **Timeout**        | `60` seconds (in Advanced settings)                 |
-
-4. Click **Create function**.
-5. After creation, you'll add the **Function URL** and **S3 permissions** in step 4 below.
-
-> 💡 The default basic Lambda role only allows writing logs. We'll add S3 read access in step 4.
+3. Click **Create function**
+4. In **Configuration → General configuration** → **Edit** → set **Timeout** to `60` seconds → **Save**
 
 ---
 
-#### 3️⃣ Upload Lambda Code & Set Environment Variables
+### Step 3 — Configure Okta (AWS Secrets Manager)
 
-1. Open the Lambda Console.
-2. Select your function (e.g., `dev-aiuc-frontend`) or the one you created above.
-3. In the **Code** tab → **Upload from** → **.zip file** → upload `lambda.zip`.
-4. Go to **Configuration** → **Environment variables** → **Edit**, and set:
+Okta credentials are **never hardcoded**. The `OKTA_CLIENT_ID` is stored in Secrets Manager and fetched at runtime by the Lambda via the `/api/okta-config` endpoint.
 
-| Key              | Value                                              | Description                                        |
-| ---------------- | -------------------------------------------------- | -------------------------------------------------- |
-| `BUCKET_NAME`    | `<YOUR_BUCKET_NAME>`                               | S3 bucket storing frontend assets and JSON data    |
-| `S3_REGION`      | `<YOUR_REGION>` (e.g. `us-east-2`)                 | AWS region of the S3 bucket and Secrets Manager    |
-| `DIST_PREFIX`    | `dist`                                             | Folder inside S3 bucket containing built frontend  |
-| `OKTA_ISSUER`    | `https://<your-okta-domain>/oauth2/default`        | Okta issuer URL — provided by your Okta admin      |
-| `AIUC_SECRET_NAME` | `<your-secret-name>` (e.g. `aiuc/okta`)          | AWS Secrets Manager secret name holding Okta credentials |
+#### 3a — Create the Secret
 
-> ⚠️ **Do not** set `VITE_OKTA_CLIENT_ID` or `VITE_OKTA_ISSUER` directly in Lambda. The client ID is now fetched securely from AWS Secrets Manager at runtime (see Step 3a below).
+1. Open [Secrets Manager Console](https://console.aws.amazon.com/secretsmanager/) → **Store a new secret**
+2. Choose **Other type of secret**
+3. Add this key/value pair:
 
----
-
-#### 3a. Okta Authentication Setup (AWS Secrets Manager)
-
-Okta credentials are **not hardcoded** in the frontend or Lambda environment. The `OKTA_CLIENT_ID` is stored in **AWS Secrets Manager** and fetched at runtime by the Lambda function, which then serves it to the frontend via the `/api/okta-config` endpoint.
-
-##### How it works
-
-```
-Browser → GET /api/okta-config
-         → Lambda reads OKTA_ISSUER from its env var
-         → Lambda reads AIUC_SECRET_NAME from its env var
-         → Lambda calls Secrets Manager → gets OKTA_CLIENT_ID
-         → Returns { issuer, clientId } to browser
-         → Browser initializes Okta with these values
-```
-
-##### Step 3a-1: Create the secret in AWS Secrets Manager
-
-1. Go to **AWS Console → Secrets Manager → Store a new secret**
-2. Choose **"Other type of secret"**
-3. Under **Key/value pairs**, add:
-
-   | Key              | Value                          |
-   | ---------------- | ------------------------------ |
-   | `OKTA_CLIENT_ID` | `<Okta Client ID from your Okta admin>` |
+| Key | Value |
+|-----|-------|
+| `OKTA_CLIENT_ID` | Your Okta Client ID (from your Okta admin) |
 
 4. Click **Next**
-5. Enter a **Secret name** — use the same value you'll set as `AIUC_SECRET_NAME` in Lambda (e.g. `aiuc/okta`)
-6. Leave rotation disabled → click **Next** → **Store**
+5. Set **Secret name** — use a name you will also set as `AIUC_SECRET_NAME` in Lambda (e.g. `aiuc/okta`)
+6. Leave rotation disabled → **Next** → **Store**
 
-> ℹ️ The secret name you choose here is what goes into the Lambda env var `AIUC_SECRET_NAME`.
+#### 3b — Grant Lambda Permission to Read the Secret
 
-##### Step 3a-2: Give Lambda permission to read the secret
-
-1. In Lambda Console → **Configuration** → **Permissions** → click the **Execution role name** (opens IAM in a new tab)
-2. Click **Add permissions** → **Create inline policy**
-3. Switch to the **JSON** tab and paste:
+1. Lambda Console → **Configuration** → **Permissions** → click the **Execution role** link (opens IAM)
+2. Click **Add permissions** → **Create inline policy** → **JSON** tab → paste:
 
 ```json
 {
@@ -383,42 +195,24 @@ Browser → GET /api/okta-config
     {
       "Effect": "Allow",
       "Action": "secretsmanager:GetSecretValue",
-      "Resource": "arn:aws:secretsmanager:<YOUR_REGION>:<YOUR_ACCOUNT_ID>:secret:<YOUR_SECRET_NAME>*"
+      "Resource": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:SECRET_NAME*"
     }
   ]
 }
 ```
 
-> Replace `<YOUR_REGION>`, `<YOUR_ACCOUNT_ID>` (12-digit number, visible top-right in AWS Console), and `<YOUR_SECRET_NAME>` (e.g. `aiuc/okta`).
+Replace `REGION` (e.g. `us-east-2`), `ACCOUNT_ID` (12-digit number, top-right in AWS Console), and `SECRET_NAME` (e.g. `aiuc/okta`).
 
-4. Click **Next** → name it `aiuc-secrets-manager-read` → **Create policy**
-
-##### Step 3a-3: Verify
-
-Test the endpoint directly in your browser or with curl:
-
-```bash
-curl https://<your-lambda-url>.lambda-url.<region>.on.aws/api/okta-config
-```
-
-Expected response:
-```json
-{ "issuer": "https://yourcompany.okta.com/oauth2/default", "clientId": "0oaXXXXXXXX" }
-```
-
-If you see this, Okta is fully configured and the frontend will authenticate correctly.
+3. Click **Next** → name it `aiuc-secrets-manager-read` → **Create policy**
 
 ---
 
-#### 4️⃣ Configure Access
+### Step 4 — Attach IAM Policies to Lambda
 
-##### Step 4a: Lambda IAM Policy (S3 Access) — Required
+The Lambda execution role needs read access to S3. Without this you will get **500 Internal Server Error**.
 
-The Lambda execution role must have permission to read from your S3 bucket. Without this, you will get **500 Internal Server Error**.
-
-1. In the Lambda Console, go to **Configuration** → **Permissions** → click the **Role name** (opens IAM in a new tab).
-2. In the IAM role page, click **Add permissions** → **Create inline policy**.
-3. Select the **JSON** tab and paste:
+1. Lambda Console → **Configuration** → **Permissions** → click the **Execution role** link
+2. Click **Add permissions** → **Create inline policy** → **JSON** tab → paste:
 
 ```json
 {
@@ -428,139 +222,327 @@ The Lambda execution role must have permission to read from your S3 bucket. With
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:ListBucket"],
       "Resource": [
-        "arn:aws:s3:::<YOUR-BUCKET-NAME>",
-        "arn:aws:s3:::<YOUR-BUCKET-NAME>/*"
+        "arn:aws:s3:::YOUR_BUCKET_NAME",
+        "arn:aws:s3:::YOUR_BUCKET_NAME/*"
       ]
     }
   ]
 }
 ```
 
-4. Replace `<YOUR-BUCKET-NAME>` with your actual bucket name (same as `BUCKET_NAME` env var).
-5. Click **Next** → enter a policy name (e.g. `S3ReadPolicy`) → **Create policy**.
+Replace `YOUR_BUCKET_NAME` with your actual bucket name.
 
-> ℹ️ The Secrets Manager permission is handled separately in **Step 3a-2** above. Both policies must be attached to the Lambda execution role.
-
-##### Step 4b: Function URL — Choose one
-
-###### Option A: IAM Authentication
-
-1. **Configuration → Function URL** → **Create function URL** (or **Edit** if one exists).
-2. Set **Auth type**: `AWS_IAM`.
-3. Click **Save**.
-
-###### Option B: Public Access
-
-1. **Configuration → Function URL** → **Create function URL** (or **Edit** if one exists).
-2. Set **Auth type**: `NONE`.
-3. Click Additional settings and enable CORS for the lambda use `*`
-   You can skip the 3rd point if you already have this Resource-based policy permission
-4. **Add Resource-based policy** — go to **Configuration → Permissions → Resource-based policy statements → Add permissions**:
-   - **Policy statement**: Function URL
-   - **Auth type**: `NONE`
-   - **Principal**: `*`
-   - **Action**: `lambda:InvokeFunctionUrl`
-5. Click **Save**.
+3. Click **Next** → name it `aiuc-s3-read` → **Create policy**
 
 ---
 
-#### 5️⃣ Deployment Checklist
+### Step 5 — Configure Lambda Function URL
 
-Before going live, confirm each item:
+#### Option A — Public Access (no IAM signing required)
 
-- [ ] `dist/` built (`npm run build`) and uploaded to S3 under `dist/` folder
-- [ ] `use_cases.json` and `industry_use_cases.json` uploaded to S3 bucket root
-- [ ] Lambda code redeployed with updated `lambda.zip`
-- [ ] Lambda env vars set: `BUCKET_NAME`, `S3_REGION`, `DIST_PREFIX`, `OKTA_ISSUER`, `AIUC_SECRET_NAME`
-- [ ] Secret created in AWS Secrets Manager with key `OKTA_CLIENT_ID` (Step 3a-1)
-- [ ] Lambda IAM role has `S3ReadPolicy` inline policy (Step 4a)
-- [ ] Lambda IAM role has `aiuc-secrets-manager-read` inline policy (Step 3a-2)
-- [ ] `/api/okta-config` returns correct `issuer` and `clientId` (Step 3a-3)
-- [ ] Function URL configured with correct auth type (Step 4b)
+1. Lambda Console → **Configuration** → **Function URL** → **Create function URL**
+2. Set **Auth type** to `NONE`
+3. Under **Additional settings**, enable **CORS** and set origin to `*`
+4. Click **Save**
+5. Go to **Configuration** → **Permissions** → **Resource-based policy statements** → **Add permissions**:
+   - Policy statement: `Function URL`
+   - Auth type: `NONE`
+   - Principal: `*`
+   - Action: `lambda:InvokeFunctionUrl`
+6. Click **Save**
+
+#### Option B — IAM Authentication (more secure)
+
+1. Lambda Console → **Configuration** → **Function URL** → **Create function URL**
+2. Set **Auth type** to `AWS_IAM`
+3. Click **Save**
+
+With IAM auth, users must sign requests with SigV4. See [Granting User Access](#granting-user-access) below.
+
+---
+
+## Deployment
+
+### Option A — Manual Deployment
+
+Run these commands every time you push a new version.
+
+#### 1. Build the frontend
+
+```bash
+# Standard deployment (app at root /)
+npm run build
+
+# Sub-path deployment (e.g. behind ALB at /app/aiuc) — see Sub-Path section
+VITE_BASE_PATH=/app/aiuc npm run build
+```
+
+#### 2. Upload built files to S3
+
+```bash
+# Upload dist/ folder to s3://YOUR_BUCKET/dist/
+aws s3 sync dist/ s3://YOUR_BUCKET_NAME/dist/ --delete
+
+# Upload JSON data files to bucket root (first time only, or when data changes)
+aws s3 cp use_cases.json s3://YOUR_BUCKET_NAME/use_cases.json
+aws s3 cp industry_use_cases.json s3://YOUR_BUCKET_NAME/industry_use_cases.json
+```
+
+#### 3. Package the Lambda function
+
+```bash
+cd lambda
+npm install --omit=dev
+zip -r ../lambda.zip .
+cd ..
+```
+
+#### 4. Deploy Lambda code
+
+```bash
+aws lambda update-function-code \
+  --function-name YOUR_LAMBDA_FUNCTION_NAME \
+  --zip-file fileb://lambda.zip
+```
+
+#### 5. Set Lambda environment variables (first time or when values change)
+
+```bash
+aws lambda update-function-configuration \
+  --function-name YOUR_LAMBDA_FUNCTION_NAME \
+  --environment "Variables={
+    BUCKET_NAME=YOUR_BUCKET_NAME,
+    S3_REGION=us-east-2,
+    DIST_PREFIX=dist,
+    OKTA_ISSUER=https://YOUR_OKTA_DOMAIN/oauth2/default,
+    AIUC_SECRET_NAME=aiuc/okta,
+    CONTACT_EMAIL=aiuc@yourorg.com,
+    SMTP_HOST=smtp.gmail.com,
+    SMTP_PORT=587,
+    SMTP_USER=your@email.com,
+    SMTP_PASS=your_app_password,
+    SMTP_FROM=your@email.com
+  }"
+```
+
+> It is easier to set these in the AWS Console — see [Lambda Environment Variables](#lambda-environment-variables) below.
+
+---
+
+### Option B — GitHub Actions (Automated)
+
+Every push to `main` automatically builds, uploads to S3, and redeploys Lambda.
+
+#### Setup — Add GitHub Secrets (one time)
+
+Go to your repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret** and add:
+
+| Secret Name | Example Value | Description |
+|-------------|---------------|-------------|
+| `AWS_ACCESS_KEY_ID` | `AKIA...` | IAM user access key |
+| `AWS_SECRET_ACCESS_KEY` | `wJal...` | IAM user secret key |
+| `AWS_REGION` | `us-east-2` | AWS region |
+| `S3_BUCKET_NAME` | `aiuc-yourorg` | S3 bucket name |
+| `LAMBDA_FUNCTION_NAME` | `aiuc-frontend` | Lambda function name |
+
+Once these are set, push to `main` and the workflow in `.github/workflows/deploy.yml` handles the rest.
+
+---
+
+## Lambda Environment Variables
+
+Set these in **Lambda Console → Configuration → Environment variables → Edit**.
+
+### Required Variables
+
+| Key | Example Value | Description |
+|-----|---------------|-------------|
+| `BUCKET_NAME` | `aiuc-yourorg` | S3 bucket storing frontend assets and JSON data |
+| `S3_REGION` | `us-east-2` | AWS region of the S3 bucket |
+| `DIST_PREFIX` | `dist` | Folder inside S3 bucket containing the built frontend |
+| `OKTA_ISSUER` | `https://yourcompany.okta.com/oauth2/default` | Okta issuer URL — get from your Okta admin |
+| `AIUC_SECRET_NAME` | `aiuc/okta` | AWS Secrets Manager secret name holding `OKTA_CLIENT_ID` |
+
+### Email / Contact Form Variables
+
+| Key | Example Value | Description |
+|-----|---------------|-------------|
+| `CONTACT_EMAIL` | `aiuc@yourorg.com` | Address that receives contact form submissions |
+| `SMTP_HOST` | `smtp.gmail.com` | SMTP server hostname |
+| `SMTP_PORT` | `587` | SMTP port (587 for TLS, 465 for SSL) |
+| `SMTP_USER` | `sender@gmail.com` | SMTP login username |
+| `SMTP_PASS` | `app_password` | SMTP password or app password |
+| `SMTP_FROM` | `sender@gmail.com` | From address on outgoing emails (defaults to `SMTP_USER`) |
+
+### Optional Variables
+
+| Key | Example Value | Description |
+|-----|---------------|-------------|
+| `BASE_PATH` | `/app/aiuc` | **Only needed** when app is deployed at a sub-path behind an ALB or reverse proxy. Leave **unset** for standard Lambda Function URL deployment at root `/`. |
+
+> **Do not** set `VITE_BASE_PATH` in Lambda — it is a build-time variable only used during `npm run build`.
+
+---
+
+## Sub-Path Deployment (ALB / Reverse Proxy)
+
+If your organisation routes traffic through an ALB or internal portal where the app lives at a sub-path (e.g. `/app/aiuc`) instead of root `/`, two extra steps are required:
+
+### 1. Build with base path
+
+```bash
+VITE_BASE_PATH=/app/aiuc npm run build
+```
+
+This tells Vite to prefix all asset URLs in the built HTML with `/app/aiuc/assets/*` instead of `/assets/*`.
+
+### 2. Add BASE_PATH to Lambda environment variables
+
+In Lambda Console → **Configuration** → **Environment variables** → **Edit** → add:
+
+| Key | Value |
+|-----|-------|
+| `BASE_PATH` | `/app/aiuc` |
+
+This tells the Lambda to strip the `/app/aiuc` prefix from incoming request paths before looking up files in S3.
+
+**Example without BASE_PATH (standard setup):**
+```
+Request:  GET /assets/index.js
+S3 key:   dist/assets/index.js  ✓
+```
+
+**Example with BASE_PATH=/app/aiuc:**
+```
+Request:  GET /app/aiuc/assets/index.js
+Stripped: /assets/index.js
+S3 key:   dist/assets/index.js  ✓
+```
+
+---
+
+## S3 Bucket Structure
+
+After a full deployment your bucket should look like this:
 
 ```
-🔗 Lambda Function URL : https://xxxxx.lambda-url.your_lambda_region.on.aws/
-🔑 Access Policy ARN   : arn:aws:iam::xxxx:policy/aiuc-frontend-access
+your-bucket/
+├── dist/                        ← uploaded by: aws s3 sync dist/ s3://bucket/dist/
+│   ├── index.html
+│   └── assets/
+│       ├── index-xxxxx.js
+│       ├── index-xxxxx.css
+│       └── ...
+├── use_cases.json               ← uploaded manually to bucket root
+└── industry_use_cases.json      ← uploaded manually to bucket root
 ```
+
+The `DIST_PREFIX=dist` Lambda env var tells the handler where to find `index.html` and assets inside the bucket.
+
+The two JSON files must be at the **bucket root** (not inside `dist/`). The dashboard loads but shows empty tables if these files are missing — place `[]` in each file as a placeholder if you have no data yet.
 
 ---
 
 ## Granting User Access
 
-### Attach the managed policy to an IAM user
+### For IAM-authenticated Lambda Function URL (Option B)
 
-```bash
-aws iam attach-user-policy \
-  --user-name <USERNAME> \
-  --policy-arn <ACCESS_POLICY_ARN>
-```
-
-### Attach to an IAM role
-
-```bash
-aws iam attach-role-policy \
-  --role-name <ROLE_NAME> \
-  --policy-arn <ACCESS_POLICY_ARN>
-```
-
-### What the policy grants
+Create and attach this policy to each IAM user or role that needs access:
 
 ```json
 {
-  "Effect": "Allow",
-  "Action": "lambda:InvokeFunctionUrl",
-  "Resource": "arn:aws:lambda:<region>:<account>:function:aiuc-frontend"
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunctionUrl",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:LAMBDA_FUNCTION_NAME"
+    }
+  ]
 }
 ```
 
-> That's it — **one permission**. The Lambda's execution role handles all S3 access internally.
+```bash
+# Attach to a user
+aws iam attach-user-policy \
+  --user-name USERNAME \
+  --policy-arn arn:aws:iam::ACCOUNT_ID:policy/POLICY_NAME
+
+# Attach to a role
+aws iam attach-role-policy \
+  --role-name ROLE_NAME \
+  --policy-arn arn:aws:iam::ACCOUNT_ID:policy/POLICY_NAME
+```
+
+### For public Function URL (Option A)
+
+No IAM policy needed — Okta handles authentication at the application level.
 
 ---
 
-## Testing Access
+## Testing the Deployment
 
-### ✅ With authorized credentials
+### 1. Verify Okta config endpoint
 
 ```bash
-curl --aws-sigv4 "aws:amz:ap-southeast-2:lambda" \
-  --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
-  "https://<function-url-id>.lambda-url.ap-southeast-2.on.aws/"
+curl https://YOUR_LAMBDA_URL.lambda-url.us-east-2.on.aws/api/okta-config
 ```
 
-### ❌ Without credentials (should return 403)
-
-```bash
-curl "https://<function-url-id>.lambda-url.ap-southeast-2.on.aws/"
-# → {"Message":"Forbidden"}
+Expected response:
+```json
+{ "issuer": "https://yourcompany.okta.com/oauth2/default", "clientId": "0oaXXXXXX" }
 ```
 
-### ❌ Direct S3 access (should fail)
+### 2. Verify data endpoints
 
 ```bash
-aws s3 ls s3://aiuc/ --no-sign-request
-# → An error occurred (AccessDenied)
+curl https://YOUR_LAMBDA_URL.lambda-url.us-east-2.on.aws/api/data/use-cases
+curl https://YOUR_LAMBDA_URL.lambda-url.us-east-2.on.aws/api/data/industry
+```
+
+Both should return a JSON array. Empty array `[]` means the JSON file exists but has no data.
+
+### 3. Open the app in a browser
+
+Navigate to your Lambda Function URL — you should see the Okta login screen, then the dashboard after signing in.
+
+### 4. Test that S3 is not publicly accessible
+
+```bash
+aws s3 ls s3://YOUR_BUCKET_NAME/ --no-sign-request
+# Expected: AccessDenied error
 ```
 
 ---
 
-## Tech Stack
+## Deployment Checklist
 
-<p align="center">
+Use this before going live or after any update:
 
-| Layer          | Technology              | Badge                                                                                                        |
-| -------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Frontend**   | React 19 + TypeScript   | ![React](https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black)             |
-| **UI Library** | Material UI 5           | ![MUI](https://img.shields.io/badge/MUI-007FFF?style=flat-square&logo=mui&logoColor=white)                   |
-| **Build Tool** | Vite 7                  | ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)                |
-| **Tables**     | TanStack Table v8       | ![TanStack](https://img.shields.io/badge/TanStack-FF4154?style=flat-square&logo=reacttable&logoColor=white)  |
-| **Runtime**    | AWS Lambda (Node.js 20) | ![Lambda](https://img.shields.io/badge/Lambda-FF9900?style=flat-square&logo=awslambda&logoColor=white)       |
-| **Storage**    | Amazon S3 (Private)     | ![S3](https://img.shields.io/badge/S3-569A31?style=flat-square&logo=amazons3&logoColor=white)                |
-| **Auth**       | Okta (OIDC / PKCE)      | ![Okta](https://img.shields.io/badge/Okta-007DC1?style=flat-square&logo=okta&logoColor=white)                |
-| **Access**     | AWS IAM                 | ![IAM](https://img.shields.io/badge/IAM-DD344C?style=flat-square&logo=amazonaws&logoColor=white)             |
-| **Secrets**    | AWS Secrets Manager     | ![SecretsManager](https://img.shields.io/badge/Secrets_Manager-DD344C?style=flat-square&logo=amazonaws&logoColor=white) |
-| **IaC**        | Manual / AWS Console    | ![Console](https://img.shields.io/badge/AWS-Console-FF9900?style=flat-square&logo=amazonaws&logoColor=white) |
+**Build & Upload**
+- [ ] Ran `npm run build` (with `VITE_BASE_PATH` if deploying at sub-path)
+- [ ] Uploaded `dist/` to `s3://BUCKET_NAME/dist/` via `aws s3 sync`
+- [ ] `use_cases.json` present at S3 bucket root
+- [ ] `industry_use_cases.json` present at S3 bucket root
 
-</p>
+**Lambda**
+- [ ] Packaged `lambda.zip` from the `lambda/` folder
+- [ ] Uploaded `lambda.zip` to Lambda function
+- [ ] All required environment variables set (see [Lambda Environment Variables](#lambda-environment-variables))
+- [ ] `DIST_PREFIX` = `dist`
+- [ ] `BUCKET_NAME` matches your S3 bucket name
+- [ ] `S3_REGION` matches your S3 bucket region
+
+**IAM & Secrets**
+- [ ] Lambda execution role has `aiuc-s3-read` inline policy (S3 GetObject + ListBucket)
+- [ ] Lambda execution role has `aiuc-secrets-manager-read` inline policy
+- [ ] Secret created in Secrets Manager with key `OKTA_CLIENT_ID`
+- [ ] `AIUC_SECRET_NAME` in Lambda matches the secret name in Secrets Manager
+
+**Verification**
+- [ ] `/api/okta-config` returns correct `issuer` and `clientId`
+- [ ] App loads and Okta login works in browser
+- [ ] Direct S3 access returns AccessDenied
 
 ---
 
