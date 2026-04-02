@@ -62,6 +62,7 @@ function App() {
                 width={160}
                 height={40}
                 fallbackText="PURESTORAGE"
+                href="https://www.purestorage.com/"
               />
             </Box>
 
@@ -147,7 +148,7 @@ function App() {
             <Typography variant="body2" sx={{ color: "#666666", fontSize: "0.75rem" }}>
               Powered by
             </Typography>
-            <Logo src={spearheadImg} alt="Spearhead" width={100} height={50} fallbackText="" />
+            <Logo src={spearheadImg} alt="Spearhead" width={100} height={50} fallbackText="" href="https://www.spearhead.so/" />
           </Box>
 
           <Box sx={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center" }}>
