@@ -7,8 +7,9 @@ const secretsManager = new SecretsManagerClient({ region: process.env.S3_REGION 
 
 const BUCKET           = process.env.BUCKET_NAME;
 const DIST_PREFIX      = process.env.DIST_PREFIX;
-const OKTA_ISSUER      = process.env.OKTA_ISSUER || "";
-const AIUC_SECRET_NAME = process.env.AIUC_SECRET_NAME || "";
+const OKTA_ISSUER        = process.env.OKTA_ISSUER || "";
+const OKTA_REDIRECT_URI  = process.env.OKTA_REDIRECT_URI || "";
+const AIUC_SECRET_NAME   = process.env.AIUC_SECRET_NAME || "";
 const BASE_PATH        = (process.env.BASE_PATH || "").replace(/\/$/, "");
 
 let cachedOktaClientId = null;
@@ -121,7 +122,7 @@ export async function handler(event) {
     if (path === "/api/okta-config" || path === "/api/okta-config/") {
         try {
             const clientId = await getOktaClientId();
-            return json(200, { issuer: OKTA_ISSUER, clientId });
+            return json(200, { issuer: OKTA_ISSUER, clientId, redirectUri: OKTA_REDIRECT_URI });
         } catch (err) {
             console.error("Failed to fetch Okta config from Secrets Manager:", err);
             return json(500, { error: "Failed to load authentication configuration" });

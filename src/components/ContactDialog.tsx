@@ -58,7 +58,8 @@ export default function ContactDialog({
     setSending(true);
     setResult(null);
     try {
-      const response = await fetch("/api/contact", {
+      const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+      const response = await fetch(`${base}/api/contact`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
