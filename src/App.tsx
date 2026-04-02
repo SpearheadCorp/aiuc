@@ -19,7 +19,7 @@ import { useS3Data } from "./hooks/useS3Data";
 import { useOktaUser } from "./hooks/useOktaUser";
 import "./globals.css";
 
-const CONTACT_EMAIL     = import.meta.env.VITE_CONTACT_EMAIL     || "aiuc@purestorage.com";
+const CONTACT_EMAIL = import.meta.env.VITE_CONTACT_EMAIL || "aiuc@purestorage.com";
 const EMAIL_TOOLTIP_TEXT = import.meta.env.VITE_EMAIL_TOOLTIP_TEXT || "I'm interested — contact me";
 
 function App() {
@@ -59,8 +59,8 @@ function App() {
               <Logo
                 src={pureLogoImg}
                 alt="Pure Storage"
-                width={300}
-                height={60}
+                width={160}
+                height={40}
                 fallbackText="PURESTORAGE"
               />
             </Box>
@@ -69,7 +69,7 @@ function App() {
               <Typography
                 variant="h6"
                 component="h6"
-                sx={{ color: "#1a1a1a", fontWeight: 600, fontSize: "1.25rem" }}
+                sx={{ color: "#1a1a1a", fontWeight: 600, fontSize: "1.6rem" }}
               >
                 AI Use Case Repository
               </Typography>
@@ -82,7 +82,7 @@ function App() {
                 </Typography>
               ) : isAuthenticated ? (
                 <Typography variant="body2" sx={{ color: "#1a1a1a", fontWeight: 500, fontSize: "0.9rem" }}>
-                  Hello, <strong>{userName}</strong>
+                  Hello <strong>{userName}</strong>
                 </Typography>
               ) : (
                 <Typography variant="body2" sx={{ color: "#999", fontSize: "0.875rem" }}>
@@ -150,10 +150,13 @@ function App() {
             <Logo src={spearheadImg} alt="Spearhead" width={100} height={50} fallbackText="" />
           </Box>
 
-          <Box sx={{ flex: 1, display: "flex", justifyContent: "center", gap: 3, alignItems: "center" }}>
+          <Box sx={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center" }}>
             <Typography variant="body2" sx={{ color: "#666666", fontSize: "0.75rem", fontWeight: 500 }}>
               Confidential - Internal Use Only
             </Typography>
+          </Box>
+
+          <Box sx={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
             <Link
               href={`mailto:${CONTACT_EMAIL}`}
               underline="hover"
@@ -170,14 +173,6 @@ function App() {
               <EmailIcon sx={{ fontSize: 14 }} />
               Contact Us
             </Link>
-          </Box>
-
-          <Box sx={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
-            <Typography variant="body2" sx={{ color: "#666666", fontSize: "0.75rem", fontWeight: 500 }}>
-              {activeTab === 0
-                ? `${useCaseData.length} use cases`
-                : `${industryData.length} industry records`}
-            </Typography>
           </Box>
         </Box>
       </Box>

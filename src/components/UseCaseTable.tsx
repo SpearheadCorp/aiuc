@@ -780,38 +780,43 @@ export default function UseCaseTable({
           gap: 2,
         }}
       >
-        <TextField
-          size="small"
-          placeholder="Search all columns..."
-          value={globalFilter}
-          onChange={(e) => setGlobalFilter(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" />
-              </InputAdornment>
-            ),
-            endAdornment: globalFilter && (
-              <InputAdornment position="end">
-                <IconButton
-                  size="small"
-                  onClick={() => setGlobalFilter("")}
-                  sx={{ padding: "4px" }}
-                >
-                  <ClearIcon fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ),
-          }}
-          sx={{
-            width: 300,
-            "& .MuiOutlinedInput-root": {
-              "&.Mui-focused fieldset": {
-                borderColor: PURE_ORANGE,
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          <TextField
+            size="small"
+            placeholder="Search all columns..."
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+              endAdornment: globalFilter && (
+                <InputAdornment position="end">
+                  <IconButton
+                    size="small"
+                    onClick={() => setGlobalFilter("")}
+                    sx={{ padding: "4px" }}
+                  >
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+            sx={{
+              width: 300,
+              "& .MuiOutlinedInput-root": {
+                "&.Mui-focused fieldset": {
+                  borderColor: PURE_ORANGE,
+                },
               },
-            },
-          }}
-        />
+            }}
+          />
+          <Typography variant="body2" sx={{ color: "#666", fontSize: "0.8rem", whiteSpace: "nowrap" }}>
+            {filteredData.length} use cases
+          </Typography>
+        </Box>
         <Button
           variant="outlined"
           size="small"
