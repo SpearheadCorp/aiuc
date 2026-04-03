@@ -8,5 +8,8 @@
         "@aws-sdk/client-secrets-manager": "^3.700.0",
         "jose": "^6.2.2",
         "nodemailer": "^8.0.4"
+    },
+    "overrides": {
+        "fast-xml-parser": ">=5.5.7"
     }
 }
