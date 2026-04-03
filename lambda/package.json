@@ -10,7 +10,7 @@
         "nodemailer": "^8.0.4"
     },
     "overrides": {
-        "fast-xml-parser": ">=5.5.7"
+        "fast-xml-parser": ">=5.5.9"
     },
     "devDependencies": {
         "rollup": "^4.60.1"
