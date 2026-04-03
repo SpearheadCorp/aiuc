@@ -1,5 +1,6 @@
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import nodemailer from "nodemailer";
 
 const s3 = new S3Client({ region: process.env.S3_REGION });
@@ -7,10 +8,34 @@ const secretsManager = new SecretsManagerClient({ region: process.env.S3_REGION 
 
 const BUCKET           = process.env.BUCKET_NAME;
 const DIST_PREFIX      = process.env.DIST_PREFIX;
-const OKTA_ISSUER        = process.env.OKTA_ISSUER || "";
-const OKTA_REDIRECT_URI  = process.env.OKTA_REDIRECT_URI || "";
-const AIUC_SECRET_NAME   = process.env.AIUC_SECRET_NAME || "";
+const OKTA_ISSUER      = process.env.OKTA_ISSUER || "";
+const OKTA_AUDIENCE    = process.env.OKTA_AUDIENCE || "api://default";
+const AIUC_SECRET_NAME = process.env.AIUC_SECRET_NAME || "";
 const BASE_PATH        = (process.env.BASE_PATH || "").replace(/\/$/, "");
+
+// Cache JWKS across Lambda invocations to avoid re-fetching on every request
+let jwks = null;
+function getJwks() {
+    if (!jwks) {
+        jwks = createRemoteJWKSet(new URL(`${OKTA_ISSUER}/v1/keys`));
+    }
+    return jwks;
+}
+
+async function requireAuth(event) {
+    const authHeader = event.headers?.authorization || event.headers?.Authorization || "";
+    if (!authHeader.startsWith("Bearer ")) {
+        return json(401, { error: "Unauthorized" });
+    }
+    const token = authHeader.slice(7);
+    try {
+        await jwtVerify(token, getJwks(), { issuer: OKTA_ISSUER, audience: OKTA_AUDIENCE });
+        return null; // token is valid
+    } catch (err) {
+        console.error("Token verification failed:", err.message);
+        return json(401, { error: "Unauthorized" });
+    }
+}
 
 let cachedOktaClientId = null;
 
@@ -122,23 +147,29 @@ export async function handler(event) {
     if (path === "/api/okta-config" || path === "/api/okta-config/") {
         try {
             const clientId = await getOktaClientId();
-            return json(200, { issuer: OKTA_ISSUER, clientId, redirectUri: OKTA_REDIRECT_URI });
+            return json(200, { issuer: OKTA_ISSUER, clientId });
         } catch (err) {
             console.error("Failed to fetch Okta config from Secrets Manager:", err);
             return json(500, { error: "Failed to load authentication configuration" });
         }
     }
 
-    // ── Data API ───────────────────────────────────────────────────────────────
+    // ── Data API (auth required) ───────────────────────────────────────────────
     if (path === "/api/data/use-cases" || path === "/api/data/use-cases/") {
+        const authError = await requireAuth(event);
+        if (authError) return authError;
         return getS3Object("use_cases.json", "application/json");
     }
     if (path === "/api/data/industry" || path === "/api/data/industry/") {
+        const authError = await requireAuth(event);
+        if (authError) return authError;
         return getS3Object("industry_use_cases.json", "application/json");
     }
 
-    // ── POST /api/contact ──────────────────────────────────────────────────────
+    // ── POST /api/contact (auth required) ─────────────────────────────────────
     if ((path === "/api/contact" || path === "/api/contact/") && method === "POST") {
+        const authError = await requireAuth(event);
+        if (authError) return authError;
         try {
             const body = JSON.parse(event.body || "{}");
             const { from, subject, message } = body;

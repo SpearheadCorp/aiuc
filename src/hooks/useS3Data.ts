@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useOktaAuth } from "@okta/okta-react";
 import type { UseCaseData, IndustryData } from "../types";
 
 interface UseS3DataReturn {
@@ -17,6 +18,7 @@ export const useS3Data = (): UseS3DataReturn => {
     const [loadingIndustry, setLoadingIndustry] = useState(true);
     const [errorUseCase, setErrorUseCase] = useState<string | null>(null);
     const [errorIndustry, setErrorIndustry] = useState<string | null>(null);
+    const { oktaAuth } = useOktaAuth();
 
     useEffect(() => {
         const loadUseCaseData = async () => {
@@ -24,7 +26,10 @@ export const useS3Data = (): UseS3DataReturn => {
                 setLoadingUseCase(true);
                 setErrorUseCase(null);
                 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-                const response = await fetch(`${base}/api/data/use-cases`);
+                const token = await oktaAuth.getAccessToken();
+                const response = await fetch(`${base}/api/data/use-cases`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
                 // const response = await fetch("/data/use_cases.json");
                 if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
                 const rawData = await response.json();
@@ -50,7 +55,7 @@ export const useS3Data = (): UseS3DataReturn => {
             }
         };
         loadUseCaseData();
-    }, []);
+    }, [oktaAuth]);
 
     useEffect(() => {
         const loadIndustryData = async () => {
@@ -59,7 +64,10 @@ export const useS3Data = (): UseS3DataReturn => {
                 setErrorIndustry(null);
                 // const response = await fetch("/data/industry_use_cases.json");
                 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-                const response = await fetch(`${base}/api/data/industry`);
+                const token = await oktaAuth.getAccessToken();
+                const response = await fetch(`${base}/api/data/industry`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
                 if (!response.ok) throw new Error(`Failed to fetch industry data: ${response.status}`);
                 const rawData = await response.json();
                 const mappedData = rawData.map((item: any) => ({
@@ -87,7 +95,7 @@ export const useS3Data = (): UseS3DataReturn => {
             }
         };
         loadIndustryData();
-    }, []);
+    }, [oktaAuth]);
 
     return {
         useCaseData,

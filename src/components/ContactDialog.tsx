@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useOktaAuth } from "@okta/okta-react";
 import {
   Dialog,
   DialogTitle,
@@ -42,6 +43,7 @@ export default function ContactDialog({
     type: "success" | "error";
     text: string;
   } | null>(null);
+  const { oktaAuth } = useOktaAuth();
 
   // Reset form when dialog opens with new props
   const handleEnter = () => {
@@ -59,9 +61,13 @@ export default function ContactDialog({
     setResult(null);
     try {
       const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+      const token = await oktaAuth.getAccessToken();
       const response = await fetch(`${base}/api/contact`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           from: fromEmail,
           subject: subjectLine,
