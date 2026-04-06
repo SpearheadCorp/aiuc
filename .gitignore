@@ -38,4 +38,12 @@ Thumbs.db
 # Misc
 backup_nextjs/
 out/
-build/
+build/
+# Local Gmail test files (contain credentials / generated output)
+lambda/test-gmail-send-local.mjs
+lambda/test-template-local.mjs
+lambda/test-email-output.html
+lambda/work.txt
+lambda/get-gmail-token.mjs
+local-server.mjs
+lambda/local-server.mjs

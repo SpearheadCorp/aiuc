@@ -11,7 +11,7 @@ export async function createOktaAuth(): Promise<OktaAuth> {
     return new OktaAuth({
         issuer,
         clientId,
-        redirectUri: redirectUri || `${window.location.origin}/callback`,
+        redirectUri: redirectUri || `${window.location.origin}/login/callback`,
         scopes: ["openid", "profile", "email"],
         pkce: true,
         restoreOriginalUri: undefined,

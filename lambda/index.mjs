@@ -1,7 +1,8 @@
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import nodemailer from "nodemailer";
+import { google } from "googleapis";
+import { buildEmailHtml } from "./emailTemplate.mjs";
 
 const s3 = new S3Client({ region: process.env.S3_REGION });
 const secretsManager = new SecretsManagerClient({ region: process.env.S3_REGION });
@@ -29,7 +30,7 @@ async function requireAuth(event) {
     }
     const token = authHeader.slice(7);
     try {
-        await jwtVerify(token, getJwks(), { issuer: OKTA_ISSUER, audience: OKTA_AUDIENCE });
+        await jwtVerify(token, getJwks(), { issuer: OKTA_ISSUER, audience: OKTA_AUDIENCE, algorithms: ["RS256"] });
         return null; // token is valid
     } catch (err) {
         console.error("Token verification failed:", err.message);
@@ -47,12 +48,16 @@ async function getOktaClientId() {
     cachedOktaClientId = secret.OKTA_CLIENT_ID;
     return cachedOktaClientId;
 }
-const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "aiuc@purestorage.com";
-const SMTP_HOST     = process.env.SMTP_HOST     || "";
-const SMTP_PORT     = process.env.SMTP_PORT     || "587";
-const SMTP_USER     = process.env.SMTP_USER     || "";
-const SMTP_PASS     = process.env.SMTP_PASS     || "";
-const SMTP_FROM     = process.env.SMTP_FROM     || SMTP_USER;
+const CONTACT_EMAIL       = process.env.CONTACT_EMAIL       || "aiuc@purestorage.com";
+const GMAIL_CLIENT_ID     = process.env.GMAIL_CLIENT_ID     || "";
+const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET || "";
+const GMAIL_REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN || "";
+const GMAIL_SENDER        = process.env.GMAIL_SENDER        || "";
+
+// ── Email template branding (all optional — defaults used if not set) ─────────
+const EMAIL_HEADER_TITLE = process.env.EMAIL_HEADER_TITLE || "Contact Form";
+const EMAIL_BRAND_COLOR  = process.env.EMAIL_BRAND_COLOR  || "#FA4616";
+const EMAIL_COMPANY_NAME = process.env.EMAIL_COMPANY_NAME || "AIUC";
 
 const MIME_TYPES = {
     ".html": "text/html",
@@ -178,29 +183,63 @@ export async function handler(event) {
                 return json(400, { error: "Missing required fields: from, subject, message" });
             }
 
-            if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-                return json(503, { error: "SMTP is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS in Lambda environment variables." });
+            // Validate email format
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from)) {
+                return json(400, { error: "Invalid email address" });
             }
 
-            const transporter = nodemailer.createTransport({
-                host: SMTP_HOST,
-                port: parseInt(SMTP_PORT, 10),
-                secure: false,
-                auth: { user: SMTP_USER, pass: SMTP_PASS },
+            // Sanitize header values to prevent email header injection
+            const safeSubject = subject.replace(/[\r\n]/g, "");
+            const safeFrom    = from.replace(/[\r\n]/g, "");
+
+            if (!GMAIL_CLIENT_ID || !GMAIL_CLIENT_SECRET || !GMAIL_REFRESH_TOKEN || !GMAIL_SENDER) {
+                return json(503, { error: "Email service is not configured." });
+            }
+
+            const oauth2Client = new google.auth.OAuth2(
+                GMAIL_CLIENT_ID,
+                GMAIL_CLIENT_SECRET
+            );
+            oauth2Client.setCredentials({ refresh_token: GMAIL_REFRESH_TOKEN });
+
+            const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+
+            const htmlBody = buildEmailHtml({
+                fromEmail:   safeFrom,
+                subject:     safeSubject,
+                message,
+                contactEmail: CONTACT_EMAIL,
+                headerTitle:  EMAIL_HEADER_TITLE,
+                brandColor:   EMAIL_BRAND_COLOR,
+                companyName:  EMAIL_COMPANY_NAME,
             });
 
-            await transporter.sendMail({
-                from:    SMTP_FROM,
-                to:      CONTACT_EMAIL,
-                replyTo: from,
-                subject,
-                text:    `From: ${from}\n\n${message}`,
+            const rawLines = [
+                `From: ${GMAIL_SENDER}`,
+                `To: ${CONTACT_EMAIL}`,
+                `Reply-To: ${safeFrom}`,
+                `Subject: ${safeSubject}`,
+                `MIME-Version: 1.0`,
+                `Content-Type: text/html; charset=UTF-8`,
+                ``,
+                htmlBody,
+            ];
+
+            const raw = Buffer.from(rawLines.join("\r\n"))
+                .toString("base64")
+                .replace(/\+/g, "-")
+                .replace(/\//g, "_")
+                .replace(/=+$/, "");
+
+            await gmail.users.messages.send({
+                userId: "me",
+                requestBody: { raw },
             });
 
             return json(200, { success: true, message: "Email sent successfully" });
         } catch (err) {
             console.error("Contact email error:", err);
-            return json(500, { error: `Failed to send email: ${err.message}` });
+            return json(500, { error: "Failed to send email. Please try again later." });
         }
     }
 
@@ -210,6 +249,10 @@ export async function handler(event) {
         key = `${DIST_PREFIX}/index.html`;
     } else {
         const cleanPath = path.startsWith("/") ? path.substring(1) : path;
+        // Prevent path traversal: reject any path containing ".." segments
+        if (cleanPath.split("/").some(seg => seg === ".." || seg === ".")) {
+            return json(400, { error: "Invalid path" });
+        }
         key = `${DIST_PREFIX}/${cleanPath}`;
     }
 

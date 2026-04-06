@@ -1,19 +1,18 @@
 # AIUC – Deployment Configuration Guide
 
 > This document covers **all configuration decisions** needed to deploy the AIUC app.
-> For full step-by-step AWS setup instructions (creating S3 bucket, Lambda, IAM roles, etc.) refer to **README.md**.
+> For full step-by-step local development setup, see **README.md**.
 
 ---
 
 ## Repository
 
 **GitHub:** `https://github.com/SpearheadCorp/aiuc`
-**Branch to deploy:** `feature/okta-auth-ui-enhancements`
+**Branch to deploy:** `main`
 
 ```bash
 git clone https://github.com/SpearheadCorp/aiuc.git
 cd aiuc
-git checkout feature/okta-auth-ui-enhancements
 ```
 
 ---
@@ -26,12 +25,14 @@ git checkout feature/okta-auth-ui-enhancements
 | S3 Bucket | `auic` |
 | AWS Region | `us-east-2` |
 | Lambda Function Name | `dev-aiuc-frontend` |
+| Node.js Runtime | `20.x` |
+| Email Method | Gmail API (OAuth2) |
 
 ---
 
 ## Section 1 — Frontend Build Variables (`.env`)
 
-These are **build-time only** — they get baked into the compiled frontend during `npm run build`. They are **not** set in the Lambda console.
+These are **build-time only** — baked into the compiled frontend during `npm run build`. They are **not** set in the Lambda console.
 
 Create a `.env` file in the project root (or set them as GitHub Actions secrets for CI/CD):
 
@@ -49,11 +50,11 @@ VITE_EMAIL_TOOLTIP_TEXT=I'm interested — contact me
 |----------|----------|-------------|
 | `VITE_CONTACT_EMAIL` | No | Contact email shown in the UI footer. Defaults to `aiuc@purestorage.com` |
 | `VITE_EMAIL_TOOLTIP_TEXT` | No | Tooltip on the contact icon. Defaults to `I'm interested — contact me` |
-| `VITE_BASE_PATH` | No | Base URL path prefix for asset URLs. Only set when app is deployed at a sub-path (see Section 5). Leave **unset** for standard deployment |
+| `VITE_BASE_PATH` | No | Base URL path prefix. Only set when app is at a sub-path (see Section 5). Leave **unset** for standard deployment |
 
-> After changing any `.env` value, you must run `npm run build` again and re-upload `dist/` to S3.
+> After changing any `.env` value you must re-run `npm run build` and re-upload `dist/` to S3.
 
-> `VITE_OKTA_ISSUER` and `VITE_OKTA_CLIENT_ID` are **not used** in the frontend `.env`. Okta credentials are fetched securely at runtime from AWS Secrets Manager via `/api/okta-config`.
+> `VITE_OKTA_ISSUER` and `VITE_OKTA_CLIENT_ID` are **not** frontend build vars. Okta credentials are fetched securely at runtime from AWS Secrets Manager via `/api/okta-config`.
 
 ---
 
@@ -74,45 +75,334 @@ Set these in **AWS Lambda Console → Configuration → Environment variables �
 | Key | Value | Description |
 |-----|-------|-------------|
 | `OKTA_ISSUER` | `https://yourcompany.okta.com/oauth2/default` | Okta issuer URL — get from your Okta admin |
+| `OKTA_AUDIENCE` | `api://default` | Expected JWT audience — defaults to `api://default` |
 | `AIUC_SECRET_NAME` | `aiuc/okta` | AWS Secrets Manager secret name holding `OKTA_CLIENT_ID` |
 
 > `OKTA_CLIENT_ID` is **not** set here — it lives in Secrets Manager. See Section 3.
 
-### 2c. Email / Contact Form (Required for contact form to work)
+### 2c. Email / Contact Form — Gmail API (Required for contact form)
+
+The contact form uses **Gmail API (OAuth2)** to send branded HTML emails — not SMTP. You need a one-time credential setup (see Section 2e below for the full setup guide).
 
 | Key | Value | Description |
 |-----|-------|-------------|
-| `CONTACT_EMAIL` | `aiuc@purestorage.com` | Destination address for contact form submissions |
-| `SMTP_HOST` | `smtp.gmail.com` | SMTP server hostname |
-| `SMTP_PORT` | `587` | SMTP port (587 for TLS) |
-| `SMTP_USER` | `sender@gmail.com` | SMTP login username |
-| `SMTP_PASS` | `your_app_password` | SMTP password or app-specific password |
-| `SMTP_FROM` | `sender@gmail.com` | From address on outgoing emails (defaults to `SMTP_USER` if unset) |
+| `CONTACT_EMAIL` | `aiuc@purestorage.com` | Destination address — where contact form emails are delivered |
+| `GMAIL_CLIENT_ID` | `use-your-xxx.apps.googleusercontent.com` | Google OAuth2 Client ID from Google Cloud Console |
+| `GMAIL_CLIENT_SECRET` | `GOCSPX-xxx` | Google OAuth2 Client Secret |
+| `GMAIL_REFRESH_TOKEN` | `1//0gXXX...` | Long-lived refresh token — generated once via token script |
+| `GMAIL_SENDER` | `sender@yourcompany.com` | Gmail address used to send outgoing emails |
 
-> For Gmail: use an **App Password** (not your main Gmail password). Generate one at Google Account → Security → 2-Step Verification → App passwords.
+> The refresh token does not expire unless revoked. The Lambda automatically refreshes the short-lived access token on every invocation.
 
-### 2d. Optional Variables
+> **Removed:** `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` — these are no longer used. Remove them from Lambda env vars if present.
+
+### 2c-i. Email Template Branding (Optional — No Redeploy Needed)
+
+These 3 variables let you customise the email template appearance directly from the Lambda console — **no code change or redeployment required**. Changes take effect on the next email sent.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `EMAIL_HEADER_TITLE` | `Contact Form` | Text shown in the colored header bar at the top of every email |
+| `EMAIL_BRAND_COLOR` | `#FA4616` | Hex color used for the header background, message border, and footer links. Must be a valid 3 or 6 digit hex (e.g. `#0057B8`). Falls back to `#FA4616` if invalid. |
+| `EMAIL_COMPANY_NAME` | `AIUC` | Company name shown in the footer: *"This message was sent via the **AIUC** Contact Form to..."* |
+
+**Example — customising for a different brand:**
+
+```
+EMAIL_HEADER_TITLE = Acme Corp — AI Enquiry
+EMAIL_BRAND_COLOR  = #0057B8
+EMAIL_COMPANY_NAME = Acme Corp
+```
+
+This would produce an email with a blue (`#0057B8`) header bar, the title "Acme Corp — AI Enquiry", and footer text reading *"This message was sent via the Acme Corp Contact Form to..."*
+
+**To preview changes locally before setting in Lambda:**
+
+Add the vars to `.env.local` (uncommented), then run:
+
+```cmd
+cd lambda
+node test-template-local.mjs
+```
+
+Open `lambda/test-email-output.html` in your browser to see the result instantly.
+
+### 2d. Understanding the Gmail Credentials — What Each One Is & Why It's Required
+
+Before setting up, it helps to understand what each credential does and why it can't be skipped.
+
+#### The Big Picture — How Gmail API Auth Works
+
+Gmail API uses **OAuth2**, which is a 3-party system:
+
+```
+Your App (Lambda)  ←──────────────────────────────────────────────────────┐
+        │                                                                  │
+        │  "I want to send email as kapnachi1904@gmail.com"               │
+        ▼                                                                  │
+Google's Auth Server                                                       │
+        │                                                                  │
+        │  "Prove who you are" (Client ID + Secret)                        │
+        │  "Prove the user said yes" (Refresh Token)                       │
+        │                                                                  │
+        │  ✓ OK — here's a short-lived Access Token (1 hour)              │
+        ▼                                                                  │
+Lambda uses Access Token to call Gmail API ──────────── email sent ────────┘
+```
+
+Every email send goes through this flow. The Lambda handles it **automatically** using the 3 stored credentials — no user interaction needed after the one-time setup.
+
+---
+
+#### `GMAIL_CLIENT_ID` — Who Is Asking?
+
+**What it is:** A public identifier for your Google Cloud app (`aiuc-email` project). Looks like:
+```
+use-your-own.apps.googleusercontent.com
+```
+
+**Why required:** Google needs to know which registered application is making the request. Without it, Google has no idea who is trying to access the Gmail API and will reject the call.
+
+**Is it secret?** Technically it's public (it appears in browser URLs during OAuth flows), but it should still be kept out of source code and treated as sensitive.
+
+**Where to find it:** Google Cloud Console → APIs & Services → Credentials → your OAuth2 client.
+
+---
+
+#### `GMAIL_CLIENT_SECRET` — Prove You Own the App
+
+**What it is:** A private password that proves your Lambda is the legitimate owner of the `aiuc-email` Google Cloud app. Looks like:
+```
+<your-secret-id>
+```
+
+**Why required:** The Client ID alone is not enough — anyone could copy it. The Client Secret proves that *you* (the app owner) are making the request, not someone who just copied the Client ID. Together, Client ID + Secret = "I am the legitimate AIUC app."
+
+**Is it secret?** Yes — treat it like a password. Never commit it to git. Rotate it immediately if exposed.
+
+**Where to find it:** Google Cloud Console → Credentials → edit `aiuc-lambda-mailer` → Client Secret field.
+
+---
+
+#### `GMAIL_REFRESH_TOKEN` — Prove the Gmail User Said Yes
+
+**What it is:** A long-lived token proving that the Gmail account owner (`kapnachi1904@gmail.com`) authorized your app to send emails on their behalf. Looks like:
+```
+1//0gMZWV13IiIkYCgYIARAAGBASNwF-L9Ir...
+```
+
+**Why required — this is the most important one:**
+
+Gmail API does not accept a username + password to send email. Instead, it requires **proof of consent** from the Gmail account owner via OAuth2. That proof is the refresh token.
+
+Here's the flow in plain English:
+
+```
+1. You ran get-gmail-token.mjs
+2. Google showed a login + consent page
+3. You (the Gmail account owner) clicked "Allow"
+4. Google issued a refresh token = "this app has permanent permission to send email as you"
+5. That token is now stored in Lambda env vars
+6. Every time Lambda needs to send an email, it hands this token to Google
+7. Google checks it: "yes, the account owner approved this" → issues a 1-hour access token
+8. Lambda uses that access token to call gmail.users.messages.send()
+```
+
+**Without the refresh token:** Lambda has no way to prove the Gmail account owner consented. Google will refuse every API call with `401 Unauthorized`.
+
+**Does it expire?** The refresh token itself does **not** expire with time. It only gets revoked if:
+- The Gmail account owner goes to [myaccount.google.com/permissions](https://myaccount.google.com/permissions) and removes access
+- You reset the Client Secret in Google Cloud Console
+- Google detects suspicious activity
+
+**Is it secret?** Yes — it grants the ability to send email as your Gmail account. Treat it like a password. Rotate immediately if exposed (see credential rotation steps in Section 2e Setup Guide).
+
+---
+
+#### `GMAIL_SENDER` — Which Gmail Account to Send From
+
+**What it is:** The Gmail address that was authorized in the OAuth consent flow. This is the address that appears in the "From:" field of sent emails.
+
+**Why required:** The Gmail API call needs to know which mailbox to use. The value must match the Gmail account that was used when generating the refresh token — you can't use a refresh token from `account-a@gmail.com` to send email as `account-b@gmail.com`.
+
+---
+
+#### Side-by-Side Comparison: Old SMTP vs New Gmail API
+
+| | Old SMTP | New Gmail API |
+|--|---------|---------------|
+| **How it authenticates** | Username + password | OAuth2 Client ID + Secret + Refresh Token |
+| **Credentials** | `SMTP_USER` + `SMTP_PASS` (Gmail app password) | 3 tokens from Google Cloud Console |
+| **Token expiry** | Password never expires unless changed | Refresh token never expires unless revoked |
+| **Security** | Password-based | OAuth2 — no password stored anywhere |
+| **Setup effort** | Simple | One-time browser consent flow |
+| **Email format** | Plain text | Branded HTML template |
+| **Requires SMTP server** | Yes (`smtp.gmail.com`) | No — direct API call |
+
+---
+
+### 2e. Gmail API Setup Guide
+
+Follow these steps **once per environment** to get your Gmail credentials.
+
+#### Step 1 — Create a Google Cloud Project
+
+1. Go to [https://console.cloud.google.com](https://console.cloud.google.com)
+2. Sign in with the Gmail account that will **send** emails
+3. Project dropdown → **New Project** → name it `aiuc-email` → **Create**
+4. Make sure the new project is selected
+
+#### Step 2 — Enable Gmail API
+
+1. **APIs & Services → Library**
+2. Search `Gmail API` → click it → **Enable**
+
+#### Step 3 — Configure OAuth Consent Screen
+
+1. **APIs & Services → OAuth consent screen**
+2. User type: **External** → **Create**
+3. Fill in:
+   - App name: `AIUC Contact Form`
+   - User support email: your email
+   - Developer contact email: your email
+4. **Save and Continue** through all screens
+5. On **Test users** → **+ Add Users** → add the Gmail sender address → **Save**
+
+> The app stays in Testing mode permanently — it only needs to work for the one Gmail sender account.
+
+#### Step 4 — Create OAuth2 Credentials
+
+1. **APIs & Services → Credentials → + Create Credentials → OAuth 2.0 Client ID**
+2. Application type: **Desktop app**
+3. Name: `aiuc-lambda-mailer` → **Create**
+4. In the popup — copy:
+   - **Client ID** (e.g. `youraccount-xxx.apps.googleusercontent.com`)
+   - **Client Secret** (e.g. `GOCSPX-xxx`)
+
+#### Step 5 — Generate the Refresh Token (one-time)
+
+In the project's `lambda/` directory, create `get-gmail-token.mjs`:
+
+```js
+import { createInterface } from "readline";
+import { google } from "googleapis";
+
+const CLIENT_ID     = "PASTE_YOUR_CLIENT_ID_HERE";
+const CLIENT_SECRET = "PASTE_YOUR_CLIENT_SECRET_HERE";
+const REDIRECT_URI  = "urn:ietf:wg:oauth:2.0:oob";
+
+const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
+
+const authUrl = oauth2Client.generateAuthUrl({
+  access_type: "offline",
+  scope: ["https://www.googleapis.com/auth/gmail.send"],
+  prompt: "consent",
+});
+
+console.log("\n=== Open this URL in your browser ===\n");
+console.log(authUrl);
+console.log("\n=====================================\n");
+
+const rl = createInterface({ input: process.stdin, output: process.stdout });
+rl.question("Paste the authorization code: ", async (code) => {
+  rl.close();
+  const { tokens } = await oauth2Client.getToken(code.trim());
+  console.log("\n=== Save these values ===\n");
+  console.log(`GMAIL_CLIENT_ID     = ${CLIENT_ID}`);
+  console.log(`GMAIL_CLIENT_SECRET = ${CLIENT_SECRET}`);
+  console.log(`GMAIL_REFRESH_TOKEN = ${tokens.refresh_token}`);
+  console.log("\n========================\n");
+  console.log("DELETE this file now.");
+});
+```
+
+Run it:
+
+```cmd
+cd lambda
+node get-gmail-token.mjs
+```
+
+Steps:
+1. Open the printed URL in your browser
+2. Sign in with the Gmail sender account → **Allow**
+3. Copy the authorization code Google shows
+4. Paste it into the terminal prompt → press Enter
+5. Copy all 3 output values
+
+> **Immediately delete** the script after use — it contains your credentials:
+> ```cmd
+> del lambda\get-gmail-token.mjs
+> ```
+
+#### Step 6 — Set Lambda Environment Variables
+
+In **AWS Console → Lambda → Your Function → Configuration → Environment Variables → Edit**, add:
+
+| Key | Value |
+|-----|-------|
+| `GMAIL_CLIENT_ID` | from Step 4 |
+| `GMAIL_CLIENT_SECRET` | from Step 4 |
+| `GMAIL_REFRESH_TOKEN` | from Step 5 output |
+| `GMAIL_SENDER` | Gmail address you authorized |
+| `CONTACT_EMAIL` | destination address for contact emails |
+
+Click **Save**. No redeploy needed — env vars take effect immediately.
+
+#### Step 7 — Verify Email Sending
+
+Test locally first:
+
+```cmd
+cd lambda
+set GMAIL_CLIENT_ID=your_client_id
+set GMAIL_CLIENT_SECRET=your_client_secret
+set GMAIL_REFRESH_TOKEN=your_refresh_token
+set GMAIL_SENDER=sender@gmail.com
+set CONTACT_EMAIL=destination@gmail.com
+node test-gmail-send-local.mjs
+```
+
+Expected output:
+```
+✓ Email sent successfully!
+  Gmail message ID: 18xxxxxxxxxxxxxxx
+```
+
+Check the `CONTACT_EMAIL` inbox — you should receive the branded HTML email.
+
+#### Rotating Credentials (When Credentials Are Compromised)
+
+1. Go to [https://myaccount.google.com/permissions](https://myaccount.google.com/permissions) → find the app → **Remove Access** (revokes the refresh token immediately)
+2. [Google Cloud Console](https://console.cloud.google.com/) → **Credentials** → edit `aiuc-lambda-mailer` → **Reset Secret**
+3. Re-run `get-gmail-token.mjs` with the new secret to get a new refresh token
+4. Update `GMAIL_CLIENT_SECRET` and `GMAIL_REFRESH_TOKEN` in Lambda environment variables
+
+### 2e. Optional Variables
 
 | Key | Value | Description |
 |-----|-------|-------------|
-| `BASE_PATH` | `/app/aiuc` | **Only set this** when deploying behind an ALB or reverse proxy at a sub-path. Leave **unset** for standard Lambda Function URL deployment at root `/`. See Section 5. |
+| `BASE_PATH` | `/app/aiuc` | **Only set** when deploying behind an ALB or reverse proxy at a sub-path. Leave **unset** for standard Lambda Function URL at root `/`. See Section 5. |
 
-### Complete Environment Variables Reference Table
+### Complete Lambda Environment Variables Reference
 
 | Key | Example | Required | Notes |
-|-----|---------|----------|-------|
+|-----|---------|:--------:|-------|
 | `BUCKET_NAME` | `auic` | Yes | |
 | `S3_REGION` | `us-east-2` | Yes | |
-| `DIST_PREFIX` | `dist` | Yes | Always set to `dist` |
+| `DIST_PREFIX` | `dist` | Yes | Always `dist` |
 | `OKTA_ISSUER` | `https://company.okta.com/oauth2/default` | Yes | |
-| `AIUC_SECRET_NAME` | `aiuc/okta` | Yes | Must match secret name in Secrets Manager |
-| `CONTACT_EMAIL` | `aiuc@purestorage.com` | Yes | |
-| `SMTP_HOST` | `smtp.gmail.com` | Yes | |
-| `SMTP_PORT` | `587` | Yes | |
-| `SMTP_USER` | `sender@gmail.com` | Yes | |
-| `SMTP_PASS` | `app_password` | Yes | |
-| `SMTP_FROM` | `sender@gmail.com` | No | Defaults to `SMTP_USER` |
-| `BASE_PATH` | `/app/aiuc` | No | Only for sub-path deployments |
+| `OKTA_AUDIENCE` | `api://default` | No | Defaults to `api://default` |
+| `AIUC_SECRET_NAME` | `aiuc/okta` | Yes | Must match Secrets Manager secret name |
+| `CONTACT_EMAIL` | `aiuc@purestorage.com` | Yes | Destination for contact emails |
+| `GMAIL_CLIENT_ID` | `yourown-xxx.apps.googleusercontent.com` | Yes | Google Cloud OAuth2 |
+| `GMAIL_CLIENT_SECRET` | `secret-xxx` | Yes | Google Cloud OAuth2 |
+| `GMAIL_REFRESH_TOKEN` | `1//0gXXX...` | Yes | Generated once via token script |
+| `GMAIL_SENDER` | `sender@gmail.com` | Yes | Authorized Gmail address |
+| `EMAIL_HEADER_TITLE` | `Contact Form` | No | Header bar text in email template |
+| `EMAIL_BRAND_COLOR` | `#FA4616` | No | Hex color for header/border/links in email |
+| `EMAIL_COMPANY_NAME` | `AIUC` | No | Company name shown in email footer |
+| `BASE_PATH` | `/app/aiuc` | No | Sub-path deployments only |
 
 ---
 
@@ -120,7 +410,7 @@ Set these in **AWS Lambda Console → Configuration → Environment variables �
 
 The `OKTA_CLIENT_ID` is **never hardcoded** in code or Lambda env vars. It is stored in AWS Secrets Manager and fetched at runtime.
 
-### How it works
+### How It Works
 
 ```
 Browser  →  GET /api/okta-config
@@ -128,10 +418,10 @@ Browser  →  GET /api/okta-config
          →  Lambda reads AIUC_SECRET_NAME from env var
          →  Lambda calls Secrets Manager → gets OKTA_CLIENT_ID
          →  Returns { issuer, clientId } to browser
-         →  Browser initializes Okta SDK
+         →  Browser initializes Okta SDK with PKCE
 ```
 
-### Step 1 — Create the secret
+### Step 1 — Create the Secret
 
 1. AWS Console → **Secrets Manager** → **Store a new secret**
 2. Choose **Other type of secret**
@@ -141,10 +431,10 @@ Browser  →  GET /api/okta-config
    |-----|-------|
    | `OKTA_CLIENT_ID` | Your Okta Client ID from your Okta admin |
 
-4. Click **Next** → set **Secret name** to `aiuc/okta` (this must match `AIUC_SECRET_NAME` in Lambda)
+4. Click **Next** → set **Secret name** to `aiuc/okta` (must match `AIUC_SECRET_NAME` in Lambda)
 5. Leave rotation disabled → **Next** → **Store**
 
-### Step 2 — Grant Lambda permission to read the secret
+### Step 2 — Grant Lambda Permission to Read the Secret
 
 1. Lambda Console → **Configuration** → **Permissions** → click the **Execution role** link
 2. **Add permissions** → **Create inline policy** → **JSON** tab:
@@ -162,14 +452,14 @@ Browser  →  GET /api/okta-config
 }
 ```
 
-Replace `REGION` and `ACCOUNT_ID` (12-digit number shown top-right in AWS Console).
+Replace `REGION` (e.g. `us-east-2`) and `ACCOUNT_ID` (12-digit number shown top-right in AWS Console).
 
 3. Name it `aiuc-secrets-manager-read` → **Create policy**
 
 ### Step 3 — Verify
 
 ```bash
-curl https://YOUR_LAMBDA_URL.lambda-url.us-east-2.on.aws/api/okta-config
+curl https://YOUR_LAMBDA_URL/api/okta-config
 ```
 
 Expected:
@@ -193,7 +483,7 @@ auic/  (your bucket)
 └── industry_use_cases.json      ← upload to bucket ROOT (not inside dist/)
 ```
 
-### Uploading data files
+### Uploading Data Files
 
 Upload via S3 Console (drag and drop to bucket root) or via CLI:
 
@@ -207,18 +497,46 @@ aws s3 cp industry_use_cases.json s3://auic/industry_use_cases.json
 `use_cases.json` — array of use case objects:
 ```json
 [
-  { "capability": 1, "business_function": "Finance", "ai_use_case": "...", ... }
+  {
+    "capability": 1,
+    "business_function": "Finance",
+    "business_capability": "...",
+    "stakeholder_or_user": "...",
+    "ai_use_case": "...",
+    "ai_algorithms_frameworks": "...",
+    "datasets": "...",
+    "action_implementation": "...",
+    "ai_tools_models": "...",
+    "digital_platforms_and_tools": "...",
+    "expected_outcomes_and_results": "..."
+  }
 ]
 ```
 
 `industry_use_cases.json` — array of industry objects:
 ```json
 [
-  { "id": "1", "industry": "Healthcare", "ai_use_case": "...", ... }
+  {
+    "id": "1",
+    "industry": "Healthcare",
+    "business_function": "...",
+    "business_capability": "...",
+    "stakeholders_users": "...",
+    "ai_use_case": "...",
+    "description": "...",
+    "implementation_plan": "...",
+    "expected_outcomes": "...",
+    "datasets": "...",
+    "ai_tools_platforms": "...",
+    "digital_tools_platforms": "...",
+    "ai_frameworks": "...",
+    "ai_tools_and_models": "...",
+    "industry_references": "..."
+  }
 ]
 ```
 
-Place `[]` in each file if you have no data yet — the app will load with empty tables.
+Place `[]` in each file if you have no data yet — the app loads with empty tables.
 
 ---
 
@@ -228,7 +546,7 @@ Place `[]` in each file if you have no data yet — the app will load with empty
 
 For standard Lambda Function URL deployment, **skip this section entirely**.
 
-### What changes and why
+### What Changes and Why
 
 | Without sub-path | With sub-path (`/app/aiuc`) |
 |-----------------|----------------------------|
@@ -237,7 +555,7 @@ For standard Lambda Function URL deployment, **skip this section entirely**.
 | Lambda receives `/assets/file.js` | Lambda receives `/app/aiuc/assets/file.js` |
 | No stripping needed | Must strip `/app/aiuc` prefix before S3 lookup |
 
-### Step 1 — Build with base path
+### Step 1 — Build With Base Path
 
 ```bash
 VITE_BASE_PATH=/app/aiuc npm run build
@@ -253,25 +571,25 @@ In Lambda Console → **Configuration** → **Environment variables** → **Edit
 |-----|-------|
 | `BASE_PATH` | `/app/aiuc` |
 
-The Lambda handler strips this prefix from every incoming request path before looking up the file in S3.
+The Lambda handler strips this prefix from every incoming request path before the S3 lookup.
 
-### Step 3 — Upload dist/ as normal
+### Step 3 — Upload `dist/` as Normal
 
 ```bash
 aws s3 sync dist/ s3://YOUR_BUCKET/dist/ --delete
 ```
 
-No change to S3 structure — the stripping happens at runtime in Lambda, not in S3.
+No change to S3 structure — stripping happens at runtime in Lambda, not in S3.
 
 ---
 
 ## Section 6 — Build & Deploy Commands
 
-### Standard deployment (root `/`)
+### Standard Deployment (Root `/`)
 
 ```bash
 # 1. Install dependencies
-npm install --legacy-peer-deps
+npm install
 
 # 2. Build frontend
 npm run build
@@ -291,7 +609,7 @@ aws lambda update-function-code \
   --zip-file fileb://lambda.zip
 ```
 
-### Sub-path deployment (`/app/aiuc`)
+### Sub-Path Deployment (`/app/aiuc`)
 
 Same as above but replace step 2 with:
 
@@ -300,6 +618,17 @@ VITE_BASE_PATH=/app/aiuc npm run build
 ```
 
 And also set `BASE_PATH=/app/aiuc` in Lambda environment variables.
+
+### Windows (PowerShell) — Package Lambda
+
+On Windows, replace step 4 with:
+
+```powershell
+cd lambda
+npm install --omit=dev
+Compress-Archive -Path lambda\* -DestinationPath lambda.zip -Force
+cd ..
+```
 
 ---
 
@@ -318,6 +647,17 @@ Go to repo → **Settings** → **Secrets and variables** → **Actions** → ad
 | `AWS_REGION` | `us-east-2` | AWS region |
 | `S3_BUCKET_NAME` | `auic` | S3 bucket name |
 | `LAMBDA_FUNCTION_NAME` | `dev-aiuc-frontend` | Lambda function name |
+
+### What the Workflow Does
+
+1. Triggered on push to `main`
+2. Installs Node.js 20 + runs `npm install`
+3. Runs `npm run build` → outputs `dist/`
+4. Syncs `dist/` to `s3://auic/dist/`
+5. Packages `lambda/` as `lambda.zip`
+6. Runs `aws lambda update-function-code`
+
+> Lambda environment variables are **not** managed by CI/CD — set them manually in the Lambda console.
 
 ---
 
@@ -358,37 +698,51 @@ Two inline policies must be attached to the Lambda execution role:
 }
 ```
 
+Replace `ACCOUNT_ID` with your 12-digit AWS account ID.
+
 ---
 
 ## Section 9 — Deployment Checklist
 
-### First-time setup
+### First-Time Setup
 
+**AWS Infrastructure:**
 - [ ] S3 bucket created with **Block all public access** enabled
 - [ ] Lambda function created with **Node.js 20.x**, timeout set to **60 seconds**
+- [ ] Lambda Function URL configured (Auth type: `NONE` for public access)
 - [ ] `aiuc-s3-read` inline policy attached to Lambda execution role (Section 8)
-- [ ] Secret `aiuc/okta` created in Secrets Manager with key `OKTA_CLIENT_ID` (Section 3 — Step 1)
-- [ ] `aiuc-secrets-manager-read` inline policy attached to Lambda execution role (Section 3 — Step 2)
-- [ ] Lambda Function URL configured (Auth type: `NONE` for public, `AWS_IAM` for restricted)
-- [ ] All Lambda environment variables set (Section 2)
+- [ ] `aiuc-secrets-manager-read` inline policy attached to Lambda execution role (Section 3)
 
-### Every deployment
+**Okta:**
+- [ ] Secret `aiuc/okta` created in Secrets Manager with key `OKTA_CLIENT_ID` (Section 3)
+- [ ] Lambda Function URL added to Okta app Sign-in redirect URIs
+- [ ] Lambda Function URL added to Okta app Sign-out redirect URIs
+
+**Gmail API (Contact Form):**
+- [ ] Google Cloud project created with Gmail API enabled (Section 2e — Steps 1–2)
+- [ ] OAuth consent screen configured with sender Gmail as test user (Section 2e — Step 3)
+- [ ] OAuth2 Desktop App credentials created (Section 2e — Step 4)
+- [ ] Refresh token generated via `get-gmail-token.mjs` (Section 2e — Step 5)
+- [ ] Token script deleted after use
+- [ ] All Lambda environment variables set (Section 2 complete reference table)
+
+### Every Deployment
 
 - [ ] `npm run build` run successfully (with `VITE_BASE_PATH` if sub-path deployment)
 - [ ] `dist/` uploaded to `s3://auic/dist/` via `aws s3 sync`
 - [ ] `use_cases.json` present at S3 bucket root
 - [ ] `industry_use_cases.json` present at S3 bucket root
-- [ ] `lambda.zip` packaged from `lambda/` folder
+- [ ] `lambda.zip` packaged from `lambda/` folder (`npm install --omit=dev` run first)
 - [ ] `lambda.zip` uploaded to Lambda function
 
-### Verification after deployment
+### Verification After Deployment
 
 - [ ] `GET /api/okta-config` returns correct `issuer` and `clientId`
-- [ ] `GET /api/data/use-cases` returns JSON array
-- [ ] `GET /api/data/industry` returns JSON array
 - [ ] App loads in browser and Okta login works
-- [ ] Contact form sends email successfully
-- [ ] Direct S3 URL returns `AccessDenied`
+- [ ] `GET /api/data/use-cases` returns JSON array (requires login)
+- [ ] `GET /api/data/industry` returns JSON array (requires login)
+- [ ] Contact form sends email — check `CONTACT_EMAIL` inbox for branded HTML email
+- [ ] Direct S3 URL returns `AccessDenied` (bucket is private)
 
 ---
 
