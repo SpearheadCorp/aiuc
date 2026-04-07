@@ -1,476 +1,540 @@
-<p align="center">
-  <img src="public/assets/purelogo.png" alt="Pure Storage" width="300" />
-</p>
+# AI Use Case Repository (AIUC)
 
-<h1 align="center">AI Use Case Repository</h1>
-
-<p align="center">
-  <strong>Internal AI use case & industry data dashboard — secured with AWS IAM</strong>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/React-19.2-61DAFB?style=for-the-badge&logo=react&logoColor=white" alt="React" />
-  <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Vite-7.3-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
-  <img src="https://img.shields.io/badge/MUI-5.18-007FFF?style=for-the-badge&logo=mui&logoColor=white" alt="MUI" />
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/AWS_Lambda-FF9900?style=for-the-badge&logo=awslambda&logoColor=white" alt="AWS Lambda" />
-  <img src="https://img.shields.io/badge/Amazon_S3-569A31?style=for-the-badge&logo=amazons3&logoColor=white" alt="Amazon S3" />
-  <img src="https://img.shields.io/badge/AWS_IAM-DD344C?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS IAM" />
-  <img src="https://img.shields.io/badge/AWS_SAM-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS SAM" />
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/License-Proprietary-red?style=flat-square" alt="License" />
-  <img src="https://img.shields.io/badge/Status-Internal-orange?style=flat-square" alt="Status" />
-  <img src="https://img.shields.io/badge/Access-IAM_Authenticated-green?style=flat-square" alt="Access" />
-</p>
+An internal web application for exploring, searching, and sharing AI use cases across business functions and industries. Built for the Spearhead AI event, it features Cognito-based authentication, role-based data access, an admin approval workflow, and full analytics logging.
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
-- [Overview](#overview)
+- [Features](#features)
+- [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Prerequisites](#prerequisites)
-- [Local Development](#local-development)
-- [Deployment](#deployment)
-- [Granting User Access](#granting-user-access)
-- [Testing Access](#testing-access)
-- [Tech Stack](#tech-stack)
+- [Local Development Setup](#local-development-setup)
+- [Environment Variables](#environment-variables)
+- [Available Scripts](#available-scripts)
+- [Authentication & Authorization](#authentication--authorization)
+- [Column-Level Access Control](#column-level-access-control)
+- [Admin Approval Workflow](#admin-approval-workflow)
+- [Analytics & Usage Logs](#analytics--usage-logs)
+- [API Reference](#api-reference)
+- [Deployment to AWS](#deployment-to-aws)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Overview
+## Features
 
-The **AI Use Case Repository** is an internal dashboard that surfaces AI use case data and industry-specific AI implementation records. The frontend is a React SPA served through an **AWS Lambda Function URL** with **IAM authentication**, ensuring only authorized personnel can access the application and its data.
+- **Two data views** — "Case Study" table and "Industry Data" table with virtualized scrolling for large datasets
+- **Search & filter** — full-text search and per-column filtering on all data
+- **Cognito authentication** — email/password registration, login, and forgot-password flow
+- **Role-based data access** — unauthenticated users see blurred restricted columns; authenticated users see all data
+- **Server-side data filtering** — restricted columns are stripped in the Lambda response for unauthenticated requests (JWT verified via `aws-jwt-verify`)
+- **Admin approval workflow** — non-work-email registrations trigger an admin review email with one-click Approve/Reject links (HMAC-signed, 7-day expiry, replay-protected)
+- **Contact form** — users can email the team from within the app (sent via AWS SES)
+- **Configurable column restrictions** — restricted columns controlled via Lambda environment variables (no code deployment needed)
+- **Usage analytics** — every user interaction (search, click, filter, row view) logged to S3 with session tracking
+- **Spearhead branding** — header/footer logos link to spearhead.so
 
-> **🔒 Confidential — Internal Use Only**
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Frontend** | React 19, TypeScript, Vite 7 |
+| **UI Library** | Material UI (MUI) v5 |
+| **Tables** | TanStack Table v8 + TanStack Virtual v3 |
+| **Routing** | React Router DOM v7 |
+| **Authentication** | Amazon Cognito (`amazon-cognito-identity-js`) |
+| **Backend** | AWS Lambda (Node.js 20, ESM) |
+| **Static files** | Amazon S3 (served through Lambda) |
+| **Data storage** | Amazon S3 (JSON data files + event logs) |
+| **Email** | AWS SES (`@aws-sdk/client-ses`) |
+| **JWT Verification** | `aws-jwt-verify` v4 |
+| **Deployment** | AWS Lambda Function URL (public HTTPS) |
 
 ---
 
 ## Architecture
 
-```mermaid
-graph TD
-    subgraph Access["🔐 Access Layer"]
-        User["👤 IAM User / Role"]
-    end
+```
+Browser
+  │
+  └─► Lambda Function URL  (HTTPS, public — no IAM auth)
+        │
+        ├─ GET /              ──► S3 dist/index.html         (SPA entry)
+        ├─ GET /assets/*      ──► S3 dist/assets/*           (JS, CSS, images)
+        ├─ GET /api/data/use-cases    ──► S3 use_cases.json  (filtered by auth)
+        ├─ GET /api/data/industry     ──► S3 industry_use_cases.json
+        ├─ GET /api/columns-config    ──► reads Lambda env vars
+        ├─ POST /api/validate-email   ──► domain check + approval token verify
+        ├─ GET /api/approve           ──► SES approval email to user
+        ├─ GET /api/reject            ──► SES rejection email to user
+        ├─ POST /api/contact          ──► SES email to CONTACT_EMAIL
+        └─ POST /api/log              ──► S3 logs/{date}/{eventId}.json
 
-    subgraph Lambda["⚡ Compute Layer"]
-        FnURL["Lambda Function URL\n(AuthType: AWS_IAM)"]
-        Handler["Lambda Function\n(aiuc-frontend)"]
-        Static["📄 Static Server\n/ → dist/*"]
-        API["📊 Data API\n/api/data/*"]
-    end
-
-    subgraph S3["☁️ Storage Layer (Private)"]
-        Assets["📁 dist/\nindex.html, assets/, ..."]
-        Data["📄 JSON Data\nuse_cases.json\nindustry_use_cases.json"]
-    end
-
-    User -->|"SigV4 Signed\nHTTP Request"| FnURL
-    FnURL --> Handler
-    Handler --> Static
-    Handler --> API
-    Static -->|"s3:GetObject\n(Execution Role)"| Assets
-    API -->|"s3:GetObject\n(Execution Role)"| Data
-
-    style Access fill:#1a1a2e,stroke:#e94560,color:#fff
-    style Lambda fill:#16213e,stroke:#0f3460,color:#fff
-    style S3 fill:#0f3460,stroke:#533483,color:#fff
-    style User fill:#e94560,stroke:#e94560,color:#fff
-    style FnURL fill:#f5a623,stroke:#f5a623,color:#000
-    style Handler fill:#4ecdc4,stroke:#4ecdc4,color:#000
-    style Static fill:#45b7d1,stroke:#45b7d1,color:#000
-    style API fill:#45b7d1,stroke:#45b7d1,color:#000
-    style Assets fill:#96ceb4,stroke:#96ceb4,color:#000
-    style Data fill:#96ceb4,stroke:#96ceb4,color:#000
+Browser ──► Cognito User Pool  (SDK direct calls — not proxied through Lambda)
+                                (registration, login, forgot password, session)
 ```
 
-> ❌ Direct S3 access → **BLOCKED** (PublicAccessBlock enabled)
-> ❌ Unsigned Lambda URL request → **403 Forbidden**
-> ✅ Signed request + IAM policy → **Full app access**
+**Authenticated data flow:**
 
-### How It Works
-
-| Step  | Description                                                                                  |
-| ----- | -------------------------------------------------------------------------------------------- |
-| **1** | Authorized user sends a **SigV4-signed** HTTP request to the Lambda Function URL             |
-| **2** | AWS validates the signature and checks `lambda:InvokeFunctionUrl` permission                 |
-| **3** | Lambda receives the request and determines if it's a static asset or data API call           |
-| **4** | Lambda fetches the requested content from the **private S3 bucket** using its execution role |
-| **5** | Response is returned to the user — the website loads with all data                           |
-
-> Users **never access S3 directly**. The Lambda acts as a secure proxy.
+```
+Frontend                        Lambda                       Cognito
+   │                               │                            │
+   ├─ GET /api/data/use-cases ──►  │                            │
+   │   Authorization: Bearer {idToken}                          │
+   │                               ├─ CognitoJwtVerifier ──────►│
+   │                               │◄── valid / invalid ────────┤
+   │                               │                            │
+   │                               ├─ valid:   return ALL columns
+   │                               └─ invalid: strip restricted columns
+   │◄──────────────── filtered JSON ──────────────────────────────┘
+```
 
 ---
 
 ## Project Structure
 
 ```
-aiuc.spearehead/
-├── src/                        # React frontend source
-│   ├── App.tsx                 # Main application component
-│   ├── components/             # UI components (tables, logo)
+aiuc/
+├── src/                          # React/TypeScript frontend source
+│   ├── components/
+│   │   ├── UseCaseTable.tsx      # "Case Study" tab — virtualized data table
+│   │   ├── IndustryDataTable.tsx # "Industry Data" tab — virtualized data table
+│   │   ├── LoginForm.tsx         # Cognito email/password login
+│   │   ├── RegisterForm.tsx      # Multi-step Cognito registration
+│   │   ├── ForgotPasswordForm.tsx# 3-screen password reset flow
+│   │   ├── ContactDialog.tsx     # "I'm Interested" modal (sends SES email)
+│   │   ├── RestrictedCell.tsx    # Blurred cell for restricted columns
+│   │   └── Logo.tsx              # Image with text fallback
+│   ├── config/
+│   │   ├── cognito.ts            # CognitoUserPool client (reads VITE_ env vars)
+│   │   └── restrictedColumns.ts  # Fallback restricted column lists
 │   ├── hooks/
-│   │   └── useS3Data.ts        # Data fetching via /api/data/*
-│   ├── theme.ts                # MUI theme configuration
-│   ├── types.ts                # TypeScript interfaces
-│   └── globals.css             # Global styles
+│   │   ├── useCognitoUser.ts     # Session check → userName, userEmail, isRegistered
+│   │   ├── useColumnsConfig.ts   # Fetches /api/columns-config (module-level cache)
+│   │   ├── useS3Data.ts          # Fetches /api/data/* with Cognito Bearer token
+│   │   └── useLogger.ts          # Fire-and-forget POST /api/log
+│   ├── App.tsx                   # Layout: header, tab bar, tables, footer
+│   ├── main.tsx                  # Routes: /, /login, /register, /forgot-password
+│   ├── theme.ts                  # MUI theme — Pure Orange (#fe5000)
+│   └── types.ts                  # UseCaseData, IndustryData interfaces
+│
 ├── lambda/
-│   ├── index.mjs               # Lambda handler (serves FE + data API)
-│   └── package.json            # Lambda dependencies (@aws-sdk/client-s3)
-├── package.json                # Frontend dependencies
-├── vite.config.ts              # Vite configuration
-└── .env                        # Environment variables (S3_REGION, BUCKET_NAME)
+│   ├── index.mjs                 # Lambda handler — all routes for production
+│   ├── server.mjs                # Local dev server — mirrors Lambda API routes
+│   └── package.json              # Lambda dependencies (AWS SDK v3, aws-jwt-verify)
+│
+├── public/
+│   └── assets/
+│       ├── spearhead.svg         # Favicon + header logo (SVG)
+│       ├── spearhead.png         # Footer logo (PNG)
+│       └── purelogo.png          # Pure Storage logo (login/register forms)
+│
+├── index.html                    # HTML shell (title, favicon, #root mount)
+├── vite.config.ts                # Vite: React plugin, /api/* proxy → localhost:3001
+├── package.json                  # Root scripts + frontend dependencies
+└── .env                          # Local environment variables (git-ignored)
 ```
 
 ---
 
 ## Prerequisites
 
-Before deploying, ensure you have the following installed:
-
-| Tool            | Version | Purpose                       |
-| --------------- | ------- | ----------------------------- |
-| **Node.js**     | ≥ 18.x  | Build the frontend            |
-| **npm**         | ≥ 9.x   | Package management            |
-| **AWS Account** | N/A     | Access to Lambda, S3, and IAM |
-
-```bash
-# Verify installations
-node --version
-aws --version
-sam --version
-```
-
-Configure AWS CLI with credentials that have admin/deploy permissions:
+| Tool | Version | Install |
+|------|---------|---------|
+| Node.js | ≥ 18.x | https://nodejs.org |
+| npm | ≥ 9.x | Included with Node.js |
+| AWS CLI | ≥ 2.x | https://aws.amazon.com/cli/ |
+| AWS account | — | Required for SES email in local dev |
 
 ```bash
-aws configure
+# Verify installed versions
+node --version    # must be 18+
+npm --version     # must be 9+
+aws --version     # must be 2+
 ```
 
 ---
 
-## Local Development
+## Local Development Setup
+
+### 1. Clone and install dependencies
 
 ```bash
-# Install dependencies
-npm install --legacy-peer-deps
+git clone https://github.com/NachiketAxia19/aiuc.git
+cd aiuc
 
-# Start development server
+# Install frontend dependencies
+npm install
+
+# Install Lambda dependencies (separate node_modules)
+cd lambda && npm install && cd ..
+```
+
+### 2. Create the environment file
+
+Create `.env` in the project root (the Lambda dev server loads this automatically):
+
+```env
+# ── Cognito (frontend auth — baked into bundle at build time) ──
+VITE_COGNITO_USER_POOL_ID=us-east-2_XXXXXXXXX
+VITE_COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
+VITE_AWS_REGION=us-east-2
+VITE_REDIRECT_URI=https://xxx.lambda-url.us-east-2.on.aws
+
+# ── SES email (local dev server) ──
+SES_FROM_EMAIL=aiuc@spearhead.so
+SES_REGION=us-east-2
+
+# ── App config (local dev server) ──
+CONTACT_EMAIL=aiuc@spearhead.so
+APPROVAL_EMAIL=admin@spearhead.so
+APPROVAL_SECRET=change-me-to-a-long-random-string
+APP_URL=http://localhost:5173
+
+# ── AWS credentials (SSO profile) ──
+AWS_PROFILE=aiuc-local
+```
+
+### 3. Set up AWS credentials
+
+The local API server sends emails via SES and needs AWS credentials. This project uses AWS SSO (federated login):
+
+```bash
+# First-time SSO profile setup
+aws configure sso --profile aiuc-local
+# Enter: SSO start URL, SSO region, account ID, role, output format
+
+# Login (run this each time your session expires — opens browser)
+aws sso login --profile aiuc-local
+```
+
+> If you have static IAM credentials (Access Key + Secret), you can set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in `.env` instead of using a profile.
+
+### 4. Start development servers
+
+Open **two terminals**:
+
+```bash
+# Terminal 1 — local API server (mirrors all Lambda routes)
+npm run dev:api
+# → http://localhost:3001
+
+# Terminal 2 — Vite dev server
 npm run dev
+# → http://localhost:5173
+# All /api/* requests are proxied to localhost:3001 automatically
+```
 
-# Build for production
+Open http://localhost:5173
+
+---
+
+## Environment Variables
+
+### Frontend variables (`.env` — embedded at build time)
+
+Prefixed `VITE_` — these are compiled into the JavaScript bundle. Changing them requires a rebuild.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VITE_COGNITO_USER_POOL_ID` | Yes | Cognito User Pool ID (e.g. `us-east-2_AbCdEfGhI`) |
+| `VITE_COGNITO_CLIENT_ID` | Yes | Cognito App Client ID (public client, no secret) |
+| `VITE_AWS_REGION` | Yes | AWS region where Cognito pool lives |
+| `VITE_REDIRECT_URI` | Yes | Your app URL (for Cognito Hosted UI callbacks) |
+
+### Lambda environment variables (set in Lambda Console)
+
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `BUCKET_NAME` | Yes | S3 bucket name | `aiuc` |
+| `S3_REGION` | Yes | S3 bucket region | `us-east-2` |
+| `DIST_PREFIX` | Yes | S3 folder containing the built `dist/` | `dist1` |
+| `SES_FROM_EMAIL` | Yes | Verified SES sender address | `nachiket.kapure@spearhead.so` |
+| `SES_REGION` | Yes | Region where SES identity is verified | `us-east-2` |
+| `CONTACT_EMAIL` | Yes | Receives contact form emails | `nachiket.kapure@spearhead.so` |
+| `APPROVAL_EMAIL` | Yes | Receives registration approval requests | `nachiket.kapure@ax-ia.ai` |
+| `APP_URL` | Yes | Lambda Function URL (no trailing slash) | `https://xxx.lambda-url.us-east-2.on.aws` |
+| `APPROVAL_SECRET` | Yes | HMAC-SHA256 secret for signing tokens | `a-long-random-string` |
+| `COGNITO_USER_POOL_ID` | Yes | For server-side JWT verification | `us-east-2_AbCdEfGhI` |
+| `COGNITO_CLIENT_ID` | Yes | For server-side JWT verification | `1ud7kicq2o4700g3l7v7flajgo` |
+| `USE_CASE_RESTRICTED_COLUMNS` | No | Comma-separated restricted column names | `AI Algorithms & Frameworks,Datasets` |
+| `INDUSTRY_RESTRICTED_COLUMNS` | No | Comma-separated restricted column names | `Implementation Plan,Datasets` |
+
+> `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` must match the `VITE_COGNITO_*` values used at build time.
+
+---
+
+## Available Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start Vite dev server on http://localhost:5173 |
+| `npm run dev:api` | Start local API server on http://localhost:3001 |
+| `npm run build` | TypeScript check + Vite production bundle → `dist/` |
+| `npm run lint` | ESLint on all `.ts` / `.tsx` files |
+| `npm run preview` | Serve the production `dist/` build locally |
+
+---
+
+## Authentication & Authorization
+
+### User registration
+
+```
+1. User fills RegisterForm (email, name, password)
+         │
+         ▼
+2. POST /api/validate-email
+         │
+         ├─ Approval token provided?
+         │     └─ Verify HMAC + expiry, check S3 for replay
+         │           allowed → go to step 4
+         │
+         └─ No token: check email domain
+               ├─ Personal domain (gmail, yahoo, hotmail...)? → blocked
+               └─ Work domain → allowed
+                       │
+                       ▼
+3. Admin receives SES email with Approve / Reject links
+         │
+         ▼ (after admin approves, user gets email with personal registration link)
+         │
+4. Frontend calls Cognito SignUp → user receives email verification code
+         │
+         ▼
+5. User enters code → Cognito confirms account → login enabled
+```
+
+### Login
+
+1. User enters email + password on `/login`
+2. `amazon-cognito-identity-js` calls `authenticateUser()` against Cognito
+3. On success: Cognito stores ID token in browser localStorage (handled by SDK)
+4. `useCognitoUser` hook reads session → decodes `name` + `email` attributes
+5. App shows authenticated UI with user greeting and full data access
+
+### Password reset
+
+1. `/forgot-password` — user enters email
+2. Cognito sends 6-digit code to email
+3. User enters code + new password
+4. `confirmPassword()` updates Cognito account
+
+### Data authorization
+
+- `useS3Data` hook reads Cognito ID token from current session
+- Attaches it as `Authorization: Bearer {idToken}` on all `/api/data/*` requests
+- Lambda verifies with `CognitoJwtVerifier` — valid token → all columns; no/invalid token → restricted columns blanked
+
+---
+
+## Column-Level Access Control
+
+### Two-layer protection
+
+| Layer | Mechanism | When applied |
+|-------|-----------|-------------|
+| **Frontend** | `RestrictedCell` blurs the value (CSS filter) + lock icon | Always for restricted cols when user not logged in |
+| **Backend** | Lambda strips restricted column keys from JSON before sending | When no valid JWT provided |
+
+This ensures data is never exposed even if someone bypasses the UI.
+
+### Change restricted columns without redeploying
+
+Edit **Lambda environment variables** in the Lambda Console:
+
+```
+USE_CASE_RESTRICTED_COLUMNS  =  AI Algorithms & Frameworks,Datasets,Action / Implementation,AI Tools & Models,Digital Platforms and Tools
+INDUSTRY_RESTRICTED_COLUMNS  =  Implementation Plan,Datasets,AI Tools / Platforms,Digital Tools / Platforms,AI Frameworks,AI Tools and Models,Industry References
+```
+
+- Comma-separated, no leading/trailing spaces around values
+- Column names are **case-sensitive** and must match the data exactly
+- Changes take effect on next Lambda invocation — no redeploy needed
+
+### Change defaults in code
+
+Edit `src/config/restrictedColumns.ts` (used when `/api/columns-config` is unreachable):
+
+```typescript
+export const USE_CASE_RESTRICTED_COLUMNS: string[] = [
+  "AI Algorithms & Frameworks",
+  "Datasets",
+  // ...
+];
+```
+
+Requires a frontend rebuild and redeployment after changes.
+
+---
+
+## Admin Approval Workflow
+
+When a user with a new work email registers:
+
+1. User submits RegisterForm → `POST /api/validate-email` allows the domain
+2. User sees "Pending Approval" screen and waits
+3. Admin receives this SES email at `APPROVAL_EMAIL`:
+
+```
+Subject: [AIUC] New Registration Request
+
+Name:  John Doe
+Email: john@company.com
+
+Approve: https://xxx.lambda-url.on.aws/api/approve?token=<signed-token>
+Reject:  https://xxx.lambda-url.on.aws/api/reject?token=<signed-token>
+```
+
+4. **Admin clicks Approve** →
+   - Lambda verifies HMAC signature and expiry
+   - Checks S3 `used_tokens/` to prevent replay
+   - Sends user a personal registration link (valid 7 days)
+   - User clicks link → pre-approved → can complete Cognito signup
+
+5. **Admin clicks Reject** →
+   - Sends user a rejection email mentioning `CONTACT_EMAIL` for appeals
+
+**Token properties:**
+- HMAC-SHA256 signed with `APPROVAL_SECRET`
+- 7-day expiry embedded in payload
+- One-time use: SHA256 hash stored in S3 on first use, rejected on reuse
+
+---
+
+## Analytics & Usage Logs
+
+Every user action is fire-and-forget logged to S3. Errors are swallowed — logging never affects the user experience.
+
+**S3 path:** `s3://BUCKET_NAME/logs/YYYY-MM-DD/{uuid}.json`
+
+**Logged events:**
+
+| Event type | Triggered by |
+|-----------|-------------|
+| `page_view` | App load |
+| `search` | Text entered in search box |
+| `filter` | Column filter applied |
+| `click` | Tab switch, button click |
+| `column_click` | Column header click |
+| `row_click` | Table row expanded / contact dialog opened |
+| `register` | Successful Cognito account creation |
+
+**Log entry format:**
+```json
+{
+  "eventId": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2025-04-07T12:00:00.000Z",
+  "eventType": "search",
+  "userEmail": "user@company.com",
+  "userName": "John Doe",
+  "sessionId": "550e8400-...",
+  "data": { "query": "machine learning automation" }
+}
+```
+
+**Export logs for analysis:**
+```bash
+# Download all logs for a specific date
+aws s3 sync s3://YOUR-BUCKET/logs/2025-04-07/ ./logs/ --profile aiuc-local
+
+# List all log files
+aws s3 ls s3://YOUR-BUCKET/logs/ --recursive --profile aiuc-local
+```
+
+---
+
+## API Reference
+
+All routes are served by `lambda/index.mjs` (production) or `lambda/server.mjs` (local dev).
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/` | None | SPA entry — serves `dist/index.html` |
+| `GET` | `/assets/*` | None | Static assets from S3 (JS, CSS, images) |
+| `GET` | `/api/data/use-cases` | Optional JWT | Case Study data; restricted cols stripped if no valid JWT |
+| `GET` | `/api/data/industry` | Optional JWT | Industry data; restricted cols stripped if no valid JWT |
+| `GET` | `/api/columns-config` | None | Returns `{useCaseRestricted, industryRestricted}` from env vars |
+| `POST` | `/api/validate-email` | None | Checks email domain; verifies approval token if provided |
+| `GET` | `/api/approve` | Token param | Admin approval: sends user a registration link via SES |
+| `GET` | `/api/reject` | Token param | Admin rejection: sends user a rejection email via SES |
+| `POST` | `/api/contact` | None | Sends contact form email via SES to `CONTACT_EMAIL` |
+| `POST` | `/api/log` | None | Writes analytics event to S3 (always returns 200) |
+
+---
+
+## Deployment to AWS
+
+See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the complete step-by-step guide.
+
+**Quick redeploy after code changes:**
+
+```bash
+# Step 1 — Build the frontend
 npm run build
 
-# Preview production build
-npm run preview
-```
+# Step 2 — Upload frontend to S3
+#   Replace BUCKET and PREFIX with your actual values
+aws s3 sync dist/ s3://YOUR-BUCKET/dist1/ --delete
 
-> ⚠️ **Note:** In local dev, the `/api/data/*` routes won't work unless you set up a local proxy or temporarily revert to direct S3 fetch for development.
-
----
-
-## Deployment
-
-### Automated Deployment (GitHub Actions)
-
-The recommended way to deploy is through GitHub Actions. Pushing to the `main` branch will automatically build the frontend, sync assets to S3, and update the Lambda function.
-
-#### Setup (One-time)
-
-Add the following **Secrets** to your GitHub repository (`Settings` > `Secrets` > `Actions`):
-
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION` (e.g., `us-east-2`)
-- `S3_BUCKET_NAME` (e.g., `auic`)
-- `LAMBDA_FUNCTION_NAME` (e.g., `dev-aiuc-frontend`)
-
-### Deployment GUIDE MANUAL AWS (S3 + Lambda)
-
-This guide explains how to deploy the AIUC frontend using **AWS Lambda** and **S3**, even for non-developers. Follow each step carefully.
-
----
-
-#### 1️⃣ Build & Package the Project
-
-1. Open a terminal in the project folder.
-2. Install dependencies:
-
-```bash
-npm install
-```
-
-Run only if you found any vulnerabilities in that version
-
-```bash
-npm audit fix
-```
-
-3. Build the project: `npm run build`
-4. Package the Lambda function:
-
-```
+# Step 3 — Package Lambda
 cd lambda
 npm install --omit=dev
 zip -r ../lambda.zip .
 cd ..
-```
 
-#### 1a. Create S3 Bucket (if you don't have one)
-
-1. Open the [S3 Console](https://console.aws.amazon.com/s3/) → **Create bucket**.
-2. Use these settings:
-
-| Option                  | Value / Selection                                        |
-| ----------------------- | -------------------------------------------------------- |
-| **Bucket name**         | Globally unique (e.g., `auic` or `aiuc-your-org`)        |
-| **AWS Region**          | Same as Lambda (e.g., `us-east-2`, `ap-southeast-2`)     |
-| **Object Ownership**    | **ACLs disabled** (recommended) – Bucket owner enforced  |
-| **Block Public Access** | **Block all public access** ✓ (all 4 checkboxes enabled) |
-| **Bucket Versioning**   | Disable (optional: enable for rollback)                  |
-| **Default encryption**  | SSE-S3 (recommended) or leave default                    |
-| **Advanced settings**   | Leave defaults                                           |
-
-3. Click **Create bucket**.
-
-4. **(Optional)** Add CORS configuration — if you need cross-origin access (e.g., frontend on a different domain):
-   - Open your bucket → **Permissions** tab → **Cross-origin resource sharing (CORS)** → **Edit**
-   - Paste:
-
-```json
-[
-  {
-    "AllowedHeaders": ["*"],
-    "AllowedMethods": ["GET", "HEAD"],
-    "AllowedOrigins": ["*"],
-    "ExposeHeaders": [],
-    "MaxAgeSeconds": 3000
-  }
-]
-```
-
-- Click **Save changes**.
-
-> ⚠️ **Important:** Keep "Block all public access" enabled. The Lambda execution role will access the bucket via IAM — no public access is needed.
-> ℹ️ CORS is only needed if the browser will call S3 directly (e.g., presigned URLs). For this setup (Lambda serves everything), CORS is **not required**.
-
----
-
-#### 2️⃣ Upload Static Files to S3
-
-1. Open the S3 Console.
-2. Select your bucket (auic) or the one you created above.
-3. **Upload the built frontend** — upload the contents of your local `dist/` folder into a folder named `dist` in your bucket.
-4. **Upload data files** — upload these JSON files to the **bucket root** (same level as the `dist` folder):
-
-   | File                      | Location in bucket                         | Purpose                                  |
-   | ------------------------- | ------------------------------------------ | ---------------------------------------- |
-   | `use_cases.json`          | `s3://your-bucket/use_cases.json`          | AI use case data for the main table      |
-   | `industry_use_cases.json` | `s3://your-bucket/industry_use_cases.json` | Industry-specific AI implementation data |
-
-   Both files must be JSON arrays. The dashboard will load but show empty tables if these files are missing.
-
-   **Example structure** — each file is an array of objects:
-   - `use_cases.json`: `[{ "capability": 1, "business_function": "...", "ai_use_case": "...", ... }, ...]`
-   - `industry_use_cases.json`: `[{ "id": "1", "industry": "...", "ai_use_case": "...", ... }, ...]`
-
-   Place `[]` (empty array) in each file if you have no data yet; the app will run with empty tables.
-
-**Expected bucket structure after upload:**
-
-```
-your-bucket/
-├── dist/
-│   ├── index.html
-│   ├── assets/
-│   │   ├── index-xxx.js
-│   │   └── index-xxx.css
-│   └── ...
-├── use_cases.json          ← at bucket root
-└── industry_use_cases.json ← at bucket root
-```
-
-#### 2a. Create Lambda Function (if you don't have one)
-
-1. Open the [Lambda Console](https://console.aws.amazon.com/lambda/) → **Create function**.
-2. Choose **Author from scratch**.
-3. Use these settings:
-
-| Option             | Value / Selection                                   |
-| ------------------ | --------------------------------------------------- |
-| **Function name**  | e.g., `dev-aiuc-frontend` (or `aiuc-frontend`)      |
-| **Runtime**        | **Node.js 20.x**                                    |
-| **Architecture**   | **x86_64** (or arm64 for lower cost)                |
-| **Execution role** | **Create a new role with basic Lambda permissions** |
-| **Timeout**        | `60` seconds (in Advanced settings)                 |
-
-4. Click **Create function**.
-5. After creation, you'll add the **Function URL** and **S3 permissions** in step 4 below.
-
-> 💡 The default basic Lambda role only allows writing logs. We'll add S3 read access in step 4.
-
----
-
-#### 3️⃣ Upload Lambda Code & Set Environment Variables
-
-1. Open the Lambda Console.
-2. Select your function (e.g., `dev-aiuc-frontend`) or the one you created above.
-3. In the **Code** tab → **Upload from** → **.zip file** → upload `lambda.zip`.
-4. Go to Configuration → Environment variables, and set:
-
-| Key         | Value              |
-| ----------- | ------------------ |
-| BUCKET_NAME | <YOUR_BUCKET_NAME> |
-| S3_REGION   | <YOUR_REGION>      |
-| DIST_PREFIX | dist               |
-
-#### 4️⃣ Configure Access
-
-##### Step 4a: Lambda IAM Policy (S3 Access) — Required
-
-The Lambda execution role must have permission to read from your S3 bucket. Without this, you will get **500 Internal Server Error**.
-
-1. In the Lambda Console, go to **Configuration** → **Permissions** → click the **Role name** (opens IAM in a new tab).
-2. In the IAM role page, click **Add permissions** → **Create inline policy**.
-3. Select the **JSON** tab and paste:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:ListBucket"],
-      "Resource": [
-        "arn:aws:s3:::<YOUR-BUCKET-NAME>",
-        "arn:aws:s3:::<YOUR-BUCKET-NAME>/*"
-      ]
-    }
-  ]
-}
-```
-
-4. Replace `<YOUR-BUCKET-NAME>` with your actual bucket name (same as `BUCKET_NAME` env var).
-5. Click **Next** → enter a policy name (e.g. `S3ReadPolicy`) → **Create policy**.
-
-##### Step 4b: Function URL — Choose one
-
-###### Option A: IAM Authentication
-
-1. **Configuration → Function URL** → **Create function URL** (or **Edit** if one exists).
-2. Set **Auth type**: `AWS_IAM`.
-3. Click **Save**.
-
-###### Option B: Public Access
-
-1. **Configuration → Function URL** → **Create function URL** (or **Edit** if one exists).
-2. Set **Auth type**: `NONE`.
-3. Click Additional settings and enable CORS for the lambda use `*`
-   You can skip the 3rd point if you already have this Resource-based policy permission
-4. **Add Resource-based policy** — go to **Configuration → Permissions → Resource-based policy statements → Add permissions**:
-   - **Policy statement**: Function URL
-   - **Auth type**: `NONE`
-   - **Principal**: `*`
-   - **Action**: `lambda:InvokeFunctionUrl`
-5. Click **Save**.
-
----
-
-#### 5️⃣ Deployment Complete
-
-Click on the `Function URL` to access the deployed function.
-
-```
-🔗 Lambda Function URL : https://xxxxx.lambda-url.your_lambda_region.on.aws/
-🔑 Access Policy ARN   : arn:aws:iam::xxxx:policy/aiuc-frontend-access
+# Step 4 — Deploy Lambda
+aws lambda update-function-code \
+  --function-name aiuc-frontend \
+  --zip-file fileb://lambda.zip
 ```
 
 ---
 
-## Granting User Access
+## Troubleshooting
 
-### Attach the managed policy to an IAM user
+### Blurred columns don't clear after login
+The session check is async. Wait for the loading spinner to disappear. If the issue persists, open browser DevTools → Application → Local Storage → clear entries for your domain → reload.
 
+### Local dev: `/api/contact` returns 500
+- Ensure `npm run dev:api` is running in a separate terminal
+- Run `aws sso login --profile aiuc-local` to refresh SSO credentials
+- Verify `SES_FROM_EMAIL` is a confirmed SES identity in the region set by `SES_REGION`
+
+### Local dev: "Could not load credentials from any providers"
+Your AWS SSO session has expired. Run:
 ```bash
-aws iam attach-user-policy \
-  --user-name <USERNAME> \
-  --policy-arn <ACCESS_POLICY_ARN>
+aws sso login --profile aiuc-local
 ```
 
-### Attach to an IAM role
+### Lambda returns 500 on data routes
+- Verify `BUCKET_NAME` (bucket name only, not ARN)
+- Verify `DIST_PREFIX` matches the S3 folder you uploaded `dist/` into
+- Check CloudWatch Logs: Lambda Console → Monitor → View CloudWatch logs
 
-```bash
-aws iam attach-role-policy \
-  --role-name <ROLE_NAME> \
-  --policy-arn <ACCESS_POLICY_ARN>
+### SES "MessageRejected: Email address not verified"
+- Go to SES Console → Verified identities → verify `SES_FROM_EMAIL`
+- If in **SES sandbox mode**, all *recipient* addresses must also be verified
+- Request **SES production access** to send to any address (AWS Console → SES → Account dashboard → Request production access)
+
+### Approval email links point to localhost
+Set `APP_URL` in Lambda environment variables to your Lambda Function URL:
+```
+APP_URL = https://xxx.lambda-url.us-east-2.on.aws
 ```
 
-### What the policy grants
+### JWT verification fails / users see blurred data after login
+- `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` in Lambda env vars must exactly match `VITE_COGNITO_USER_POOL_ID` and `VITE_COGNITO_CLIENT_ID` used when the frontend was built
+- Rebuild the frontend if Cognito values changed
 
-```json
-{
-  "Effect": "Allow",
-  "Action": "lambda:InvokeFunctionUrl",
-  "Resource": "arn:aws:lambda:<region>:<account>:function:aiuc-frontend"
-}
-```
-
-> That's it — **one permission**. The Lambda's execution role handles all S3 access internally.
+### Registration: "UserNotConfirmedException"
+User signed up but hasn't confirmed their email code. They should check their inbox for the Cognito verification email and enter the 6-digit code. The RegisterForm has a "Resend code" option.
 
 ---
 
-## Testing Access
-
-### ✅ With authorized credentials
-
-```bash
-curl --aws-sigv4 "aws:amz:ap-southeast-2:lambda" \
-  --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
-  "https://<function-url-id>.lambda-url.ap-southeast-2.on.aws/"
-```
-
-### ❌ Without credentials (should return 403)
-
-```bash
-curl "https://<function-url-id>.lambda-url.ap-southeast-2.on.aws/"
-# → {"Message":"Forbidden"}
-```
-
-### ❌ Direct S3 access (should fail)
-
-```bash
-aws s3 ls s3://aiuc/ --no-sign-request
-# → An error occurred (AccessDenied)
-```
-
----
-
-## Tech Stack
-
-<p align="center">
-
-| Layer          | Technology              | Badge                                                                                                        |
-| -------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Frontend**   | React 19 + TypeScript   | ![React](https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black)             |
-| **UI Library** | Material UI 5           | ![MUI](https://img.shields.io/badge/MUI-007FFF?style=flat-square&logo=mui&logoColor=white)                   |
-| **Build Tool** | Vite 7                  | ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)                |
-| **Tables**     | TanStack Table v8       | ![TanStack](https://img.shields.io/badge/TanStack-FF4154?style=flat-square&logo=reacttable&logoColor=white)  |
-| **Runtime**    | AWS Lambda (Node.js 20) | ![Lambda](https://img.shields.io/badge/Lambda-FF9900?style=flat-square&logo=awslambda&logoColor=white)       |
-| **Storage**    | Amazon S3 (Private)     | ![S3](https://img.shields.io/badge/S3-569A31?style=flat-square&logo=amazons3&logoColor=white)                |
-| **Auth**       | AWS IAM                 | ![IAM](https://img.shields.io/badge/IAM-DD344C?style=flat-square&logo=amazonaws&logoColor=white)             |
-| **IaC**        | Manual / AWS Console    | ![Console](https://img.shields.io/badge/AWS-Console-FF9900?style=flat-square&logo=amazonaws&logoColor=white) |
-
-</p>
-
----
-
-<p align="center">
-  <sub>Powered by <strong>Spearhead</strong> • Confidential – Internal Use Only</sub>
-</p>
+*Confidential — Internal Use Only • Powered by Spearhead*

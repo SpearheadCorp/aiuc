@@ -7,18 +7,18 @@
  */
 
 import http from "http";
-import { createHmac } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import path from "path";
-import nodemailer from "nodemailer";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
 // ---------------------------------------------------------------------------
 // Load lambda/.env (if it exists) into process.env
 // ---------------------------------------------------------------------------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const envPath = path.join(__dirname, ".env");
+// Read from root .env (one level up from lambda/)
+const envPath = path.join(__dirname, "..", ".env");
 try {
   const raw = readFileSync(envPath, "utf8");
   for (const line of raw.split("\n")) {
@@ -27,14 +27,14 @@ try {
     const eqIndex = trimmed.indexOf("=");
     if (eqIndex === -1) continue;
     const key = trimmed.slice(0, eqIndex).trim();
-    const raw = trimmed.slice(eqIndex + 1).trim();
+    const val = trimmed.slice(eqIndex + 1).trim();
     // Strip surrounding single or double quotes (e.g. KEY="value" → value)
-    const value = raw.replace(/^["']|["']$/g, "");
+    const value = val.replace(/^["']|["']$/g, "");
     if (key && !(key in process.env)) process.env[key] = value;
   }
   console.log(`[env] Loaded ${envPath}`);
 } catch {
-  console.warn(`[env] No lambda/.env found — using process environment only.`);
+  console.warn(`[env] No .env found — using process environment only.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,6 @@ const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "aiuc@purestorage.com";
 const APPROVAL_EMAIL = process.env.APPROVAL_EMAIL || CONTACT_EMAIL;
 const APP_URL = (process.env.APP_URL || `http://localhost:5173`).replace(/\/$/, "");
 const APPROVAL_SECRET = process.env.APPROVAL_SECRET || "change-me-in-production";
-const geminiClient = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 function generateApprovalToken(email, domain, name) {
   const payload = Buffer.from(JSON.stringify({
@@ -62,63 +61,16 @@ function verifyApprovalToken(token) {
   const payload = token.slice(0, dotIdx);
   const sig = token.slice(dotIdx + 1);
   const expected = createHmac("sha256", APPROVAL_SECRET).update(payload).digest("hex");
-  if (sig !== expected) return null;
+  try {
+    if (!timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"))) return null;
+  } catch {
+    return null;
+  }
   try {
     const data = JSON.parse(Buffer.from(payload, "base64url").toString());
     if (Date.now() > data.exp) return null;
     return data;
   } catch { return null; }
-}
-
-async function checkDomainWithGemini(domain) {
-  const safeDefault = {
-    confidence: 0,
-    isEnterprise: false,
-    reasoning: "Classification unavailable — AI service error",
-    recommendation: "Review",
-  };
-
-  if (!process.env.GEMINI_API_KEY) {
-    console.warn("[checkDomainWithGemini] GEMINI_API_KEY not set — skipping AI check");
-    return safeDefault;
-  }
-
-  const prompt = `You are an email domain classifier. Determine if this domain belongs to a business or enterprise organization.
-
-Domain: ${domain}
-
-Respond with ONLY valid JSON (no markdown code fences, no extra text before or after):
-{
-  "confidence": <integer 0-100>,
-  "isEnterprise": <true or false>,
-  "reasoning": "<one concise sentence>",
-  "recommendation": "<Approve, Review, or Reject>"
-}
-
-Rules:
-- confidence > 80  → clearly enterprise (company, university, government, NGO) → "Approve"
-- confidence 50–80 → ambiguous, needs human review → "Review"
-- confidence < 50  → likely personal or suspicious → "Reject"`;
-
-  try {
-    const model = geminiClient.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().trim();
-    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    const parsed = JSON.parse(cleaned);
-
-    return {
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
-      isEnterprise: typeof parsed.isEnterprise === "boolean" ? parsed.isEnterprise : false,
-      reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "No reasoning provided",
-      recommendation: ["Approve", "Review", "Reject"].includes(parsed.recommendation)
-        ? parsed.recommendation
-        : "Review",
-    };
-  } catch (err) {
-    console.error("[checkDomainWithGemini] Error:", err.message);
-    return safeDefault;
-  }
 }
 
 const BLOCKED_DOMAINS = new Set([
@@ -133,15 +85,21 @@ const BLOCKED_DOMAINS = new Set([
   "msn.com",
 ]);
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp.gmail.com",
-  port: parseInt(process.env.SMTP_PORT || "587"),
-  secure: false, // STARTTLS on port 587
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+const ses = new SESClient({ region: process.env.SES_REGION || process.env.AWS_REGION || "us-east-2" });
+const SES_FROM = process.env.SES_FROM_EMAIL;
+
+async function sendEmail({ to, subject, text, replyTo }) {
+  const params = {
+    Source: SES_FROM,
+    Destination: { ToAddresses: [to] },
+    Message: {
+      Subject: { Data: subject },
+      Body: { Text: { Data: text } },
+    },
+    ...(replyTo ? { ReplyToAddresses: [replyTo] } : {}),
+  };
+  await ses.send(new SendEmailCommand(params));
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -197,8 +155,7 @@ const server = http.createServer(async (req, res) => {
     const regLink = `${APP_URL}/register?token=${encodeURIComponent(regToken)}`;
 
     try {
-      await transporter.sendMail({
-        from: process.env.SMTP_FROM,
+      await sendEmail({
         to: payload.email,
         subject: "You're approved — complete your registration for AI Use Case Repository",
         text: [
@@ -235,8 +192,7 @@ const server = http.createServer(async (req, res) => {
     if (!payload) return html("Invalid or Expired Link", "This rejection link is invalid or has expired (links are valid for 7 days).");
 
     try {
-      await transporter.sendMail({
-        from: process.env.SMTP_FROM,
+      await sendEmail({
         to: payload.email,
         subject: "Update on your AI Use Case Repository access request",
         text: [
@@ -268,8 +224,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       console.log(`[contact] Sending email — from: ${from}, subject: ${subject}`);
-      await transporter.sendMail({
-        from: process.env.SMTP_FROM,
+      await sendEmail({
         to: CONTACT_EMAIL,
         replyTo: from,
         subject,
@@ -281,6 +236,17 @@ const server = http.createServer(async (req, res) => {
       console.error(`[contact] Error:`, err.message);
       return send(res, 500, { error: "Failed to send email" });
     }
+  }
+
+  // GET /api/columns-config — returns which columns are greyed out
+  if (req.method === "GET" && url === "/api/columns-config") {
+    const useCaseRestricted = process.env.USE_CASE_RESTRICTED_COLUMNS
+      ? process.env.USE_CASE_RESTRICTED_COLUMNS.split(",").map((s) => s.trim()).filter(Boolean)
+      : ["AI Algorithms & Frameworks", "Datasets", "Action / Implementation", "AI Tools & Models", "Digital Platforms and Tools"];
+    const industryRestricted = process.env.INDUSTRY_RESTRICTED_COLUMNS
+      ? process.env.INDUSTRY_RESTRICTED_COLUMNS.split(",").map((s) => s.trim()).filter(Boolean)
+      : ["Implementation Plan", "Datasets", "AI Tools / Platforms", "Digital Tools / Platforms", "AI Frameworks", "AI Tools and Models", "Industry References"];
+    return send(res, 200, { useCaseRestricted, industryRestricted });
   }
 
   // POST /api/validate-email — domain validation pre-gate
@@ -307,76 +273,22 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: "Invalid email address" });
       }
 
-      // 1. Whitelist check
-      const whitelist = (process.env.WHITELIST_DOMAINS || "")
-        .split(",")
-        .map(d => d.trim().toLowerCase())
-        .filter(Boolean);
-
-      if (whitelist.includes(domain)) {
-        console.log(`[validate-email] Whitelisted domain: ${domain}`);
-        return send(res, 200, { allowed: true });
-      }
-
-      // 2. Block known personal providers — silent, no email
+      // 1. Block known personal providers — silent, no email
       if (BLOCKED_DOMAINS.has(domain)) {
         console.log(`[validate-email] Blocked personal domain: ${domain}`);
         return send(res, 200, { allowed: false });
       }
 
-      // 3. Unknown domain — ask Gemini to classify it
-      const aiResult = await checkDomainWithGemini(domain);
-      const { confidence } = aiResult;
-      const autoApprove   = confidence > 80;
-      const pendingReview = confidence >= 10 && confidence <= 80;
-
-      console.log(`[validate-email] domain=${domain} confidence=${confidence} recommendation=${aiResult.recommendation} autoApprove=${autoApprove} pendingReview=${pendingReview}`);
-
-      const approvalToken = generateApprovalToken(email, domain, name || "");
-      const approveLink = `${APP_URL}/api/approve?token=${encodeURIComponent(approvalToken)}`;
-      const rejectLink  = `${APP_URL}/api/reject?token=${encodeURIComponent(approvalToken)}`;
-
-      await transporter.sendMail({
-        from: process.env.SMTP_FROM,
-        to: APPROVAL_EMAIL,
-        subject: `[AIUC] Registration — ${domain} | ${autoApprove ? "Auto-Approved" : pendingReview ? "Needs Review" : "Rejected"} (${confidence}%)`,
-        text: [
-          "A new user has requested access to the AI Use Case Repository.",
-          "",
-          `Registrant  : ${name || "Not provided"} <${email}>`,
-          `Domain      : ${domain}`,
-          `Confidence  : ${confidence}%`,
-          `Enterprise  : ${aiResult.isEnterprise ? "Yes" : "No"}`,
-          `AI Reasoning: ${aiResult.reasoning}`,
-          `Recommended : ${aiResult.recommendation}`,
-          "",
-          autoApprove
-            ? "✅ Access GRANTED automatically (confidence > 80%). No action needed."
-            : pendingReview
-              ? `⏳ Access PENDING — take action:\n\n  ✅ APPROVE: ${approveLink}\n\n  ❌ REJECT:  ${rejectLink}`
-              : `❌ Auto-REJECTED (confidence < 10%).\nTo override:\n\n  ✅ APPROVE: ${approveLink}\n\n  ❌ REJECT:  ${rejectLink}`,
-        ].join("\n"),
-      });
-
-      // > 80%: full approval — RegisterForm proceeds straight to Cognito signup
-      if (autoApprove) {
-        return send(res, 200, { allowed: true });
-      }
-
-      // 10–80%: pending human review — RegisterForm shows "pending" screen
-      if (pendingReview) {
-        return send(res, 200, { allowed: true, pendingApproval: true });
-      }
-
-      // < 10%: blocked
-      return send(res, 200, { allowed: false });
+      // 2. Any non-personal domain is allowed
+      console.log(`[validate-email] Non-personal domain allowed: ${domain}`);
+      return send(res, 200, { allowed: true });
     } catch (err) {
       console.error(`[validate-email] Error:`, err.message);
       return send(res, 500, { error: "Failed to validate email" });
     }
   }
 
-  // POST /api/log — no-op locally (DynamoDB not available)
+  // POST /api/log — no-op locally (S3 not available in dev)
   if (req.method === "POST" && url === "/api/log") {
     await readBody(req).catch(() => { });
     return send(res, 200, { ok: true });
@@ -389,8 +301,6 @@ server.listen(PORT, () => {
   console.log(`\n Local API server → http://localhost:${PORT}`);
   console.log(`   CONTACT_EMAIL     : ${CONTACT_EMAIL}`);
   console.log(`   APPROVAL_EMAIL    : ${APPROVAL_EMAIL}`);
-  console.log(`   WHITELIST_DOMAINS : ${process.env.WHITELIST_DOMAINS || "(none)"}`);
-  console.log(`   GEMINI_API_KEY    : ${process.env.GEMINI_API_KEY ? "set ✓" : "NOT SET — AI check will be skipped"}`);
-  console.log(`   SMTP_USER         : ${process.env.SMTP_USER || "(not set)"}`);
-  console.log(`   SMTP_HOST         : ${process.env.SMTP_HOST || "smtp.gmail.com"}\n`);
+  console.log(`   SES_FROM_EMAIL    : ${SES_FROM || "(not set)"}`);
+  console.log(`   SES_REGION        : ${process.env.SES_REGION || process.env.AWS_REGION || "us-east-2"}\n`);
 });

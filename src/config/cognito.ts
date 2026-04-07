@@ -16,7 +16,6 @@ const CLIENT_ID = import.meta.env.VITE_COGNITO_CLIENT_ID as string;
 // TODO: Replace with real AWS region from AWS Console (e.g. "us-east-1", "us-west-2")
 export const COGNITO_REGION = import.meta.env.VITE_AWS_REGION as string;
 
-export const userPool = new CognitoUserPool({
-    UserPoolId: USER_POOL_ID,
-    ClientId: CLIENT_ID,
-});
+export const userPool = USER_POOL_ID && CLIENT_ID
+    ? new CognitoUserPool({ UserPoolId: USER_POOL_ID, ClientId: CLIENT_ID })
+    : null;

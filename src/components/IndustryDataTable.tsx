@@ -50,7 +50,7 @@ import { parseChipItems } from "../utils";
 import ContactDialog from "./ContactDialog";
 import RestrictedCell from "./RestrictedCell";
 import { useLogger } from "../hooks/useLogger";
-import { INDUSTRY_RESTRICTED_COLUMNS } from "../config/restrictedColumns";
+import { useColumnsConfig } from "../hooks/useColumnsConfig";
 import { APP_CONFIG } from "../config/appConfig";
 import LockIcon from "@mui/icons-material/Lock";
 
@@ -77,9 +77,9 @@ export default function IndustryDataTable({
   userEmail,
   isRegistered = false,
 }: IndustryDataTableProps) {
+  const { industryRestricted } = useColumnsConfig();
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState("");
 
   // Contact dialog state
@@ -378,45 +378,8 @@ export default function IndustryDataTable({
   const columns = useMemo<ColumnDef<IndustryData>[]>(
     () => [
       {
-        id: "select",
-        header: ({ table }) => (
-          <Checkbox
-            checked={table.getIsAllPageRowsSelected()}
-            indeterminate={table.getIsSomePageRowsSelected()}
-            onChange={table.getToggleAllPageRowsSelectedHandler()}
-            size="small"
-            sx={{
-              color: PURE_ORANGE,
-              "&.Mui-checked": { color: PURE_ORANGE },
-              "&.MuiCheckbox-indeterminate": { color: PURE_ORANGE },
-            }}
-          />
-        ),
-        cell: ({ row }) => (
-          <Checkbox
-            checked={row.getIsSelected()}
-            disabled={!row.getCanSelect()}
-            indeterminate={row.getIsSomeSelected()}
-            onChange={(e) => {
-              row.getToggleSelectedHandler()(e);
-              logRowClick(row.original.Id, { action: "select" });
-            }}
-            size="small"
-            sx={{
-              color: PURE_ORANGE,
-              "&.Mui-checked": { color: PURE_ORANGE },
-            }}
-          />
-        ),
-        size: 50,
-      },
-      {
         id: "contact",
-        header: () => (
-          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.8rem" }}>
-            Contact
-          </Typography>
-        ),
+        header: () => null,
         cell: ({ row }) => (
           <Tooltip title={APP_CONFIG.emailTooltipText} arrow>
             <IconButton
@@ -844,10 +807,8 @@ export default function IndustryDataTable({
     columns,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    state: { sorting, rowSelection },
+    state: { sorting },
     onSortingChange: setSorting,
-    onRowSelectionChange: setRowSelection,
-    enableRowSelection: true,
     getRowId: (row) => row.Id,
   });
 
@@ -945,6 +906,17 @@ export default function IndustryDataTable({
             },
           }}
         />
+        <Typography
+          variant="body2"
+          sx={{ color: "#666", fontSize: "0.8rem", fontWeight: 500, whiteSpace: "nowrap" }}
+        >
+          {filteredData.length === data.length
+            ? `${data.length} use cases`
+            : `${filteredData.length} of ${data.length} use cases`}
+        </Typography>
+
+        <Box sx={{ flex: 1 }} />
+
         <Button
           variant="outlined"
           size="small"
@@ -1078,7 +1050,7 @@ export default function IndustryDataTable({
                 headerGroup.headers.map((header) => {
                   const isHeaderRestricted =
                     !isAuthenticated &&
-                    INDUSTRY_RESTRICTED_COLUMNS.includes(header.column.id);
+                    industryRestricted.includes(header.column.id);
                   return (
                     <Box
                       key={header.id}
@@ -1157,7 +1129,7 @@ export default function IndustryDataTable({
                     {row.getVisibleCells().map((cell) => {
                       const isCellRestricted =
                         !isAuthenticated &&
-                        INDUSTRY_RESTRICTED_COLUMNS.includes(cell.column.id);
+                        industryRestricted.includes(cell.column.id);
                       return (
                         <Box
                           key={cell.id}

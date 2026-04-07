@@ -38,4 +38,6 @@ Thumbs.db
 # Misc
 backup_nextjs/
 out/
-build/
+build/
+dist1/
+lambda.zip

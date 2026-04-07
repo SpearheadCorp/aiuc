@@ -49,7 +49,7 @@ import { parseChipItems } from "../utils";
 import ContactDialog from "./ContactDialog";
 import RestrictedCell from "./RestrictedCell";
 import { useLogger } from "../hooks/useLogger";
-import { USE_CASE_RESTRICTED_COLUMNS } from "../config/restrictedColumns";
+import { useColumnsConfig } from "../hooks/useColumnsConfig";
 import { APP_CONFIG } from "../config/appConfig";
 import LockIcon from "@mui/icons-material/Lock";
 
@@ -76,6 +76,7 @@ export default function UseCaseTable({
   userEmail,
   isRegistered = false,
 }: UseCaseTableProps) {
+  const { useCaseRestricted } = useColumnsConfig();
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
@@ -96,12 +97,12 @@ export default function UseCaseTable({
     "Business Capability",
     "Stakeholder or User",
     "AI Use Case",
+    "Expected Outcomes and Results",
     "AI Algorithms & Frameworks",
     "Datasets",
     "Action / Implementation",
     "AI Tools & Models",
     "Digital Platforms and Tools",
-    "Expected Outcomes and Results",
   ];
 
   const multiselectColumns = [
@@ -574,6 +575,35 @@ export default function UseCaseTable({
         },
       },
       {
+        accessorKey: "Expected Outcomes and Results",
+        header: ({ column }) => <CustomHeader column={column} />,
+        meta: { headerName: "Expected Outcomes and Results" },
+        size: 300,
+        enableSorting: true,
+        cell: ({ row, getValue }) => {
+          const rowId = row.original.id;
+          const isExpanded = expandedRows.has(rowId);
+          return (
+            <Box
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleRowExpansion(rowId);
+              }}
+              sx={{
+                width: "100%",
+                maxWidth: "100%",
+                overflow: isExpanded ? "visible" : "hidden",
+                position: "relative",
+                display: "flex",
+                alignItems: isExpanded ? "flex-start" : "center",
+              }}
+            >
+              {renderChips(getValue() as string, rowId, isExpanded)}
+            </Box>
+          );
+        },
+      },
+      {
         accessorKey: "AI Algorithms & Frameworks",
         header: ({ column }) => <CustomHeader column={column} />,
         meta: { headerName: "AI Algorithms & Frameworks" },
@@ -720,35 +750,6 @@ export default function UseCaseTable({
           );
         },
       },
-      {
-        accessorKey: "Expected Outcomes and Results",
-        header: ({ column }) => <CustomHeader column={column} />,
-        meta: { headerName: "Expected Outcomes and Results" },
-        size: 300,
-        enableSorting: true,
-        cell: ({ row, getValue }) => {
-          const rowId = row.original.id;
-          const isExpanded = expandedRows.has(rowId);
-          return (
-            <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
-              sx={{
-                width: "100%",
-                maxWidth: "100%",
-                overflow: isExpanded ? "visible" : "hidden",
-                position: "relative",
-                display: "flex",
-                alignItems: isExpanded ? "flex-start" : "center",
-              }}
-            >
-              {renderChips(getValue() as string, rowId, isExpanded)}
-            </Box>
-          );
-        },
-      },
     ],
     [expandedRows, CustomHeader, renderChips, toggleRowExpansion, handleContactClick]
   );
@@ -858,6 +859,17 @@ export default function UseCaseTable({
             },
           }}
         />
+        <Typography
+          variant="body2"
+          sx={{ color: "#666", fontSize: "0.8rem", fontWeight: 500, whiteSpace: "nowrap" }}
+        >
+          {filteredData.length === data.length
+            ? `${data.length} use cases`
+            : `${filteredData.length} of ${data.length} use cases`}
+        </Typography>
+
+        <Box sx={{ flex: 1 }} />
+
         <Button
           variant="outlined"
           size="small"
@@ -991,7 +1003,7 @@ export default function UseCaseTable({
                 headerGroup.headers.map((header) => {
                   const isHeaderRestricted =
                     !isAuthenticated &&
-                    USE_CASE_RESTRICTED_COLUMNS.includes(header.column.id);
+                    useCaseRestricted.includes(header.column.id);
                   return (
                     <Box
                       key={header.id}
@@ -1070,7 +1082,7 @@ export default function UseCaseTable({
                     {row.getVisibleCells().map((cell) => {
                       const isCellRestricted =
                         !isAuthenticated &&
-                        USE_CASE_RESTRICTED_COLUMNS.includes(cell.column.id);
+                        useCaseRestricted.includes(cell.column.id);
                       return (
                         <Box
                           key={cell.id}

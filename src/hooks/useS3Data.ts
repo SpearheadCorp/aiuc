@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import type { UseCaseData, IndustryData } from "../types";
+import { userPool } from "../config/cognito";
 
 interface UseS3DataReturn {
     useCaseData: UseCaseData[];
@@ -8,6 +9,19 @@ interface UseS3DataReturn {
     loadingIndustry: boolean;
     errorUseCase: string | null;
     errorIndustry: string | null;
+}
+
+/** Get the Cognito ID token for the current session, or null if not signed in. */
+function getCognitoToken(): Promise<string | null> {
+    return new Promise((resolve) => {
+        const user = userPool?.getCurrentUser();
+        if (!user) { resolve(null); return; }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        user.getSession((err: Error | null, session: any) => {
+            if (err || !session?.isValid()) { resolve(null); return; }
+            resolve(session.getIdToken().getJwtToken() as string);
+        });
+    });
 }
 
 export const useS3Data = (): UseS3DataReturn => {
@@ -23,7 +37,9 @@ export const useS3Data = (): UseS3DataReturn => {
             try {
                 setLoadingUseCase(true);
                 setErrorUseCase(null);
-                const response = await fetch("/data/use_cases.json");
+                const token = await getCognitoToken();
+                const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+                const response = await fetch("/api/data/use-cases", { headers });
                 if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
                 const rawData = await response.json();
                 const mappedData = rawData.map((item: any) => ({
@@ -55,7 +71,9 @@ export const useS3Data = (): UseS3DataReturn => {
             try {
                 setLoadingIndustry(true);
                 setErrorIndustry(null);
-                const response = await fetch("/data/industry_use_cases.json");
+                const token = await getCognitoToken();
+                const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+                const response = await fetch("/api/data/industry", { headers });
                 if (!response.ok) throw new Error(`Failed to fetch industry data: ${response.status}`);
                 const rawData = await response.json();
                 const mappedData = rawData.map((item: any) => ({

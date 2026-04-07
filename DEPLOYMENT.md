@@ -1,6 +1,6 @@
 # AI Use Case Repository — AWS Deployment Guide
 
-This guide covers everything needed to deploy the AI Use Case Repository from scratch on AWS Lambda.
+Complete step-by-step guide to deploy AIUC from scratch on AWS Lambda.
 
 ---
 
@@ -10,17 +10,19 @@ This guide covers everything needed to deploy the AI Use Case Repository from sc
 - [AWS Services Required](#aws-services-required)
 - [Prerequisites](#prerequisites)
 - [Step 1 — Create Cognito User Pool](#step-1--create-cognito-user-pool)
-- [Step 2 — Create DynamoDB Table](#step-2--create-dynamodb-table)
+- [Step 2 — Verify SES Identity](#step-2--verify-ses-identity)
 - [Step 3 — Create S3 Bucket](#step-3--create-s3-bucket)
 - [Step 4 — Create Lambda Function](#step-4--create-lambda-function)
 - [Step 5 — Lambda IAM Permissions](#step-5--lambda-iam-permissions)
 - [Step 6 — Environment Variables](#step-6--environment-variables)
 - [Step 7 — Build & Upload](#step-7--build--upload)
-- [Step 8 — Set Lambda Function URL](#step-8--set-lambda-function-url)
-- [GitHub Actions (CI/CD)](#github-actions-cicd)
+- [Step 8 — Lambda Function URL](#step-8--lambda-function-url)
+- [Step 9 — Verify the Deployment](#step-9--verify-the-deployment)
+- [GitHub Actions CI/CD](#github-actions-cicd)
 - [Configuring Restricted Columns](#configuring-restricted-columns)
 - [Admin Approval Flow](#admin-approval-flow)
 - [Viewing Usage Logs](#viewing-usage-logs)
+- [Redeployment Cheatsheet](#redeployment-cheatsheet)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -30,30 +32,34 @@ This guide covers everything needed to deploy the AI Use Case Repository from sc
 ```
 Browser
   │
-  └─► Lambda Function URL (HTTPS, no auth)
+  └─► Lambda Function URL  (public HTTPS — no IAM auth)
         │
-        ├─ Static files (/, /assets/*)  ──► S3 bucket  (dist/ folder)
-        ├─ /api/data/*                  ──► S3 bucket  (use_cases.json, industry_use_cases.json)
-        ├─ /api/validate-email          ──► Google Gemini API + SMTP email
-        ├─ /api/approve + /api/reject   ──► SMTP email
-        ├─ /api/contact                 ──► SMTP email
-        └─ /api/log                     ──► DynamoDB table (aiuc-usage-logs)
+        ├─ GET /              ──► S3 {DIST_PREFIX}/index.html
+        ├─ GET /assets/*      ──► S3 {DIST_PREFIX}/assets/*
+        ├─ GET /api/data/*    ──► S3 use_cases.json / industry_use_cases.json
+        │                         (restricted columns stripped for unauth users)
+        ├─ GET /api/columns-config  ──► Lambda env vars (no S3 call)
+        ├─ POST /api/validate-email ──► domain check + HMAC token verify
+        ├─ GET /api/approve         ──► SES email to user
+        ├─ GET /api/reject          ──► SES email to user
+        ├─ POST /api/contact        ──► SES email to CONTACT_EMAIL
+        └─ POST /api/log            ──► S3 logs/{date}/{eventId}.json
 
-Browser ──► Cognito User Pool (registration / login — direct SDK call, not via Lambda)
+Browser ──► Cognito User Pool  (direct SDK — not proxied through Lambda)
 ```
 
 ---
 
 ## AWS Services Required
 
-| Service | Purpose | AWS Free Tier |
-|---------|---------|---------------|
-| **AWS Lambda** | Serves frontend + all API routes | 1M requests/month free |
-| **Amazon S3** | Stores built frontend + JSON data files | 5 GB free |
-| **Amazon DynamoDB** | Usage event logging (search, click, register, etc.) | 25 GB free |
-| **Amazon Cognito** | User registration and login | 50,000 MAU free |
+| Service | Purpose | Free Tier |
+|---------|---------|-----------|
+| **AWS Lambda** | Serves frontend + all API routes | 1M requests/month |
+| **Amazon S3** | Frontend files, data JSON, usage logs | 5 GB storage |
+| **Amazon Cognito** | User registration and authentication | 50,000 MAU |
+| **Amazon SES** | Transactional email (contact, approve, reject) | 3,000 emails/month (in production) |
 
-> No Secrets Manager or Okta required for the current setup.
+> No DynamoDB, Gemini API, SMTP, or Secrets Manager required.
 
 ---
 
@@ -62,72 +68,88 @@ Browser ──► Cognito User Pool (registration / login — direct SDK call, n
 | Tool | Version | Install |
 |------|---------|---------|
 | Node.js | ≥ 18.x | https://nodejs.org |
-| npm | ≥ 9.x | Comes with Node.js |
+| npm | ≥ 9.x | Included with Node.js |
 | AWS CLI | ≥ 2.x | https://aws.amazon.com/cli/ |
 | AWS account | — | https://aws.amazon.com |
 
 ```bash
-# Verify versions
-node --version
-npm --version
-aws --version
+# Verify
+node --version && npm --version && aws --version
 
-# Configure AWS CLI with your credentials
+# Configure AWS CLI (skip if using SSO/federated login)
 aws configure
-# Enter: Access Key ID, Secret Access Key, Region (e.g. us-east-2), output format (json)
+# Enter: Access Key ID, Secret Access Key, Region (e.g. us-east-2), json
+```
+
+For federated SSO accounts:
+```bash
+aws configure sso --profile aiuc-deploy
+aws sso login --profile aiuc-deploy
+# Then prefix all aws CLI commands with: --profile aiuc-deploy
 ```
 
 ---
 
 ## Step 1 — Create Cognito User Pool
 
-1. Open [AWS Cognito Console](https://console.aws.amazon.com/cognito/)
-2. Click **Create user pool**
-3. Configure as follows:
+1. Open [Cognito Console](https://console.aws.amazon.com/cognito/) → **Create user pool**
 
-**Sign-in options:**
-- Check **Email**
+2. Configure:
+
+**Authentication providers → Cognito user pool**
+- Sign-in options: check **Email**
 
 **Password policy:**
 - Minimum 8 characters
-- Require: uppercase, lowercase, numbers, symbols
+- Require uppercase, lowercase, numbers, special characters
 
-**Multi-factor authentication:** None (optional)
+**Multi-factor authentication:** None (or Optional — your choice)
+
+**Self-service account recovery:** Enable email recovery
 
 **Required attributes:** `email`, `name`
 
-**Email delivery:** Cognito (free) or SES for production
+**Email delivery:** Cognito (for testing) — switch to SES for production volume
 
 **App client:**
 - App type: **Public client** (no client secret)
-- App client name: e.g., `aiuc-web`
-- Auth flows to enable: `ALLOW_USER_PASSWORD_AUTH`, `ALLOW_REFRESH_TOKEN_AUTH`
-- Callback URL: your Lambda Function URL (you'll get this in Step 8 — add it later)
+- App client name: `aiuc-web`
+- Auth flows: enable `ALLOW_USER_PASSWORD_AUTH`, `ALLOW_REFRESH_TOKEN_AUTH`
+- Callback URL: `https://placeholder.example.com` (update after Step 8)
 
-4. Click **Create user pool**
+3. Click **Create user pool**
 
-**Note down these values — you'll need them:**
-- **User Pool ID** → e.g., `us-east-2_AbCdEfGhI` → `VITE_COGNITO_USER_POOL_ID`
-- **App Client ID** → e.g., `1ud7kicq2o4700g3l7v7flajgo` → `VITE_COGNITO_CLIENT_ID`
-- **Region** → e.g., `us-east-2` → `VITE_AWS_REGION`
+**Save these values — needed for `.env` and Lambda env vars:**
+
+| Value | Where to find it | Variable name |
+|-------|-----------------|---------------|
+| User Pool ID | User pool overview page | `VITE_COGNITO_USER_POOL_ID` + `COGNITO_USER_POOL_ID` |
+| App Client ID | App integration → App clients | `VITE_COGNITO_CLIENT_ID` + `COGNITO_CLIENT_ID` |
+| Region | Top-right of AWS Console | `VITE_AWS_REGION` |
 
 ---
 
-## Step 2 — Create DynamoDB Table
+## Step 2 — Verify SES Identity
 
-1. Open [DynamoDB Console](https://console.aws.amazon.com/dynamodb/)
-2. Click **Create table**
+The Lambda sends emails using SES. The sender address must be verified.
 
-| Setting | Value |
-|---------|-------|
-| Table name | `aiuc-usage-logs` |
-| Partition key | `eventId` — type: **String** |
-| Sort key | *(leave empty)* |
-| Table settings | **Default settings** (On-demand capacity) |
+1. Open [SES Console](https://console.aws.amazon.com/ses/) → **Verified identities → Create identity**
+2. Choose **Email address**
+3. Enter: `nachiket.kapure@spearhead.so` (or your sender address)
+4. Click **Create identity**
+5. Check your inbox → click the verification link
 
-3. Click **Create table**
+**For full domain verification** (recommended — allows any `@spearhead.so` address):
+1. Choose **Domain** instead of Email address
+2. Enter: `spearhead.so`
+3. Add the provided CNAME DNS records to your domain registrar
+4. Wait for DNS propagation (usually <1 hour)
 
-That's it. The Lambda will write to this table automatically.
+**SES Sandbox vs Production:**
+
+By default, SES is in **Sandbox mode** — you can only send to verified addresses. To send to anyone:
+1. SES Console → **Account dashboard → Request production access**
+2. Fill in the use case form (takes ~24h)
 
 ---
 
@@ -137,28 +159,27 @@ That's it. The Lambda will write to this table automatically.
 
 | Setting | Value |
 |---------|-------|
-| Bucket name | Globally unique name, e.g., `aiuc-spearhead-prod` |
-| Region | **Same region as your Lambda** (e.g., `us-east-2`) |
-| Block all public access | **All 4 checkboxes ON** ← important |
-| Bucket versioning | Disabled (or enable for rollback capability) |
+| Bucket name | Globally unique, e.g., `aiuc-spearhead-prod` |
+| Region | **Same as your Lambda** (e.g., `us-east-2`) |
+| Block all public access | **All 4 checkboxes ON** ← required |
+| Bucket versioning | Disabled (optional — enable for rollback) |
 | Default encryption | SSE-S3 (recommended) |
 
 2. Click **Create bucket**
 
-**Note down:** bucket name → you'll use this as `BUCKET_NAME` in Lambda env vars.
-
-### Upload data files
-
-After creating the bucket, upload your two JSON data files to the **bucket root**:
+3. Upload your data files to the **bucket root**:
 
 ```bash
-aws s3 cp use_cases.json          s3://YOUR-BUCKET-NAME/use_cases.json
-aws s3 cp industry_use_cases.json s3://YOUR-BUCKET-NAME/industry_use_cases.json
+aws s3 cp use_cases.json            s3://YOUR-BUCKET/use_cases.json
+aws s3 cp industry_use_cases.json   s3://YOUR-BUCKET/industry_use_cases.json
 ```
 
-Or upload via the S3 Console → click your bucket → **Upload** → drag files → **Upload**.
+Both files must be JSON arrays: `[{ ... }, { ... }]`. Upload `[]` as a placeholder if you have no data yet.
 
-Both files must be JSON arrays (e.g., `[{ ... }, { ... }]`). If you have no data yet, upload `[]` as a placeholder.
+4. (Optional) Set a lifecycle rule to expire old logs:
+   - Bucket → Management → Lifecycle rules → Create rule
+   - Scope: prefix `logs/`
+   - Action: Expire current versions after **90 days**
 
 ---
 
@@ -174,107 +195,94 @@ Both files must be JSON arrays (e.g., `[{ ... }, { ... }]`). If you have no data
 | Architecture | x86_64 |
 | Execution role | **Create a new role with basic Lambda permissions** |
 
-2. Click **Create function**
-
-3. After creation, set the timeout:
+2. After creation, increase the timeout:
    - **Configuration → General configuration → Edit**
-   - Set **Timeout** to `1 min 0 sec` (60 seconds)
+   - Timeout: `1 min 0 sec`
+   - Memory: `256 MB` (increase to `512 MB` if cold starts are slow)
    - Click **Save**
 
 ---
 
 ## Step 5 — Lambda IAM Permissions
 
-The Lambda execution role needs S3 read access and DynamoDB write access.
+The Lambda execution role needs S3 read + write access (data files, logs, token replay protection) and SES send access.
 
-1. In Lambda Console → **Configuration → Permissions**
-2. Click the **Role name** link (opens IAM Console in a new tab)
-3. Click **Add permissions → Create inline policy**
-4. Click the **JSON** tab and paste:
+1. Lambda Console → **Configuration → Permissions**
+2. Click the **Role name** (opens IAM Console)
+3. **Add permissions → Create inline policy**
+4. Switch to **JSON** tab and paste:
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "S3ReadAccess",
+      "Sid": "S3DataAndLogs",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:ListBucket"],
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
       "Resource": [
         "arn:aws:s3:::YOUR-BUCKET-NAME",
         "arn:aws:s3:::YOUR-BUCKET-NAME/*"
       ]
     },
     {
-      "Sid": "DynamoDBWriteLogs",
+      "Sid": "SESSendEmail",
       "Effect": "Allow",
-      "Action": ["dynamodb:PutItem"],
-      "Resource": "arn:aws:dynamodb:YOUR-REGION:YOUR-ACCOUNT-ID:table/aiuc-usage-logs"
+      "Action": [
+        "ses:SendEmail",
+        "ses:SendRawEmail"
+      ],
+      "Resource": "*"
     }
   ]
 }
 ```
 
-Replace:
-- `YOUR-BUCKET-NAME` → your S3 bucket name
-- `YOUR-REGION` → e.g., `us-east-2`
-- `YOUR-ACCOUNT-ID` → your 12-digit AWS account ID (visible top-right in AWS Console)
+Replace `YOUR-BUCKET-NAME` with your actual S3 bucket name.
 
-5. Click **Next** → name it `aiuc-s3-dynamo-policy` → **Create policy**
+5. Click **Next** → name it `aiuc-s3-ses-policy` → **Create policy**
 
 ---
 
 ## Step 6 — Environment Variables
 
-### 6a. Frontend environment variables (`.env`)
+### 6a. Frontend `.env` (baked into bundle at build time)
 
-These are **baked into the JavaScript bundle** at build time. Set them before running `npm run build`.
-
-Create a `.env` file in the project root (copy from `.env.example`):
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
+Create `.env` in the project root. These `VITE_` prefixed values are compiled into JavaScript — you must rebuild and re-upload the frontend after changing them.
 
 ```env
-VITE_COGNITO_USER_POOL_ID=us-east-2_XXXXXXXXX       # from Step 1
-VITE_COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx    # from Step 1
-VITE_AWS_REGION=us-east-2                            # your AWS region
-VITE_REDIRECT_URI=https://xxx.lambda-url.us-east-1.on.aws  # your Lambda URL (from Step 8)
-VITE_CONTACT_EMAIL=aiuc@yourcompany.com              # contact email shown in footer
+# Cognito (must match the user pool and client from Step 1)
+VITE_COGNITO_USER_POOL_ID=us-east-2_XXXXXXXXX
+VITE_COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
+VITE_AWS_REGION=us-east-2
+VITE_REDIRECT_URI=https://xxx.lambda-url.us-east-2.on.aws
 ```
 
-> If you don't have the Lambda URL yet (Step 8), set `VITE_REDIRECT_URI` to a placeholder and rebuild after Step 8.
+> If you don't have the Lambda URL yet (Step 8), use a placeholder — update and rebuild after Step 8.
 
 ### 6b. Lambda environment variables
 
-Set these in the **Lambda Console → Configuration → Environment variables → Edit → Add environment variable**.
+Set in **Lambda Console → Configuration → Environment variables → Edit → Add environment variable**.
 
 | Key | Value | Notes |
 |-----|-------|-------|
-| `BUCKET_NAME` | `aiuc-spearhead-prod` | Your S3 bucket name |
-| `S3_REGION` | `us-east-2` | Region of your S3 bucket |
-| `DIST_PREFIX` | `dist` | Folder in S3 where frontend is uploaded |
-| `LOG_TABLE_NAME` | `aiuc-usage-logs` | DynamoDB table name from Step 2 |
-| `CONTACT_EMAIL` | `aiuc@yourcompany.com` | Receives contact form messages |
-| `APPROVAL_EMAIL` | `admin@yourcompany.com` | Receives registration approval requests (defaults to CONTACT_EMAIL) |
-| `WHITELIST_DOMAINS` | `purestorage.com,spearhead.so` | Comma-separated domains — skip AI check, instant access |
-| `GEMINI_API_KEY` | `AIzaSy...` | Get free at https://aistudio.google.com/app/apikey |
-| `APP_URL` | `https://xxx.lambda-url.us-east-1.on.aws` | Your Lambda Function URL (no trailing slash) |
-| `APPROVAL_SECRET` | `change-me-to-a-long-random-string` | Signs approval tokens — use a strong random string |
-| `SMTP_HOST` | `smtp.gmail.com` | SMTP server |
-| `SMTP_PORT` | `587` | SMTP port |
-| `SMTP_USER` | `youremail@gmail.com` | SMTP login |
-| `SMTP_PASS` | `xxxx xxxx xxxx xxxx` | Gmail App Password (not your regular password) |
-| `SMTP_FROM` | `noreply@yourcompany.com` | From address on sent emails |
-
-**Getting a Gmail App Password:**
-1. Go to [Google Account](https://myaccount.google.com/) → Security
-2. Enable 2-Step Verification (if not already)
-3. Go to Security → App passwords
-4. Generate a password for "Mail" → copy the 16-character code → paste as `SMTP_PASS`
+| `BUCKET_NAME` | `aiuc-spearhead-prod` | Your S3 bucket name (not ARN) |
+| `S3_REGION` | `us-east-2` | Must match bucket region |
+| `DIST_PREFIX` | `dist1` | S3 folder containing built frontend files |
+| `SES_FROM_EMAIL` | `nachiket.kapure@spearhead.so` | Must be verified in SES (Step 2) |
+| `SES_REGION` | `us-east-2` | Region where SES identity is verified |
+| `CONTACT_EMAIL` | `nachiket.kapure@spearhead.so` | Receives contact form submissions |
+| `APPROVAL_EMAIL` | `nachiket.kapure@ax-ia.ai` | Receives registration approval requests |
+| `APP_URL` | `https://xxx.lambda-url.us-east-2.on.aws` | Your Lambda Function URL (Step 8) |
+| `APPROVAL_SECRET` | `a-long-random-secret-string` | Signs/verifies approval tokens — keep secret |
+| `COGNITO_USER_POOL_ID` | `us-east-2_XXXXXXXXX` | Must match `VITE_COGNITO_USER_POOL_ID` |
+| `COGNITO_CLIENT_ID` | `xxxxxxxxxxxxxxxxxxxxxxxxxx` | Must match `VITE_COGNITO_CLIENT_ID` |
+| `USE_CASE_RESTRICTED_COLUMNS` | `AI Algorithms & Frameworks,Datasets,Action / Implementation,AI Tools & Models,Digital Platforms and Tools` | Comma-separated; no spaces around commas |
+| `INDUSTRY_RESTRICTED_COLUMNS` | `Implementation Plan,Datasets,AI Tools / Platforms,Digital Tools / Platforms,AI Frameworks,AI Tools and Models,Industry References` | Comma-separated |
 
 ---
 
@@ -286,69 +294,100 @@ Set these in the **Lambda Console → Configuration → Environment variables �
 # From the project root
 npm install
 npm run build
-# Creates: dist/ folder
+# Output: dist/ folder
 ```
 
-### 7b. Package the Lambda
+### 7b. Upload frontend to S3
+
+The `DIST_PREFIX` Lambda env var controls which folder in S3 to serve from. If `DIST_PREFIX=dist1`:
+
+```bash
+aws s3 sync dist/ s3://YOUR-BUCKET-NAME/dist1/ --delete
+```
+
+### 7c. Package the Lambda
 
 ```bash
 cd lambda
-npm install --omit=dev
+npm install --omit=dev    # production deps only
 zip -r ../lambda.zip .
 cd ..
 ```
 
-### 7c. Upload frontend to S3
-
-```bash
-aws s3 sync dist/ s3://YOUR-BUCKET-NAME/dist/ --delete
-```
+> On Windows, use Git Bash or WSL for the `zip` command. Alternatively, select all files inside `lambda/` and create a zip via File Explorer (the zip must contain `index.mjs` at the root, not inside a subfolder).
 
 ### 7d. Upload Lambda code
 
+**Via AWS Console:**
+Lambda Console → Code → **Upload from** → **.zip file** → upload `lambda.zip` → **Save**
+
+**Via CLI:**
 ```bash
 aws lambda update-function-code \
   --function-name aiuc-frontend \
   --zip-file fileb://lambda.zip
 ```
 
-Or via Console: **Lambda → Code → Upload from → .zip file** → upload `lambda.zip`.
-
 ---
 
-## Step 8 — Set Lambda Function URL
+## Step 8 — Lambda Function URL
 
-1. In Lambda Console → **Configuration → Function URL**
-2. Click **Create function URL** (or **Edit** if it exists)
+1. Lambda Console → **Configuration → Function URL**
+2. Click **Create function URL**
 
 | Setting | Value |
 |---------|-------|
-| Auth type | **NONE** |
-| Configure cross-origin resource sharing (CORS) | **✓ Enable** |
-| Allow origin | `*` |
-| Allow headers | `content-type` |
+| Auth type | **NONE** (public — no IAM signing required) |
+| Configure CORS | **✓ Enable** |
+| Allow origins | `*` |
+| Allow headers | `content-type,authorization` |
 | Allow methods | `*` |
 
 3. Click **Save**
-4. Copy the **Function URL** — it looks like:
-   `https://xxxxxxxxxxxxxxxx.lambda-url.us-east-1.on.aws`
+4. Copy the Function URL — looks like:
+   `https://i55277glxwyi6tmhik5dzvdaiu0czjsa.lambda-url.us-east-2.on.aws`
 
 5. **Update two places with this URL:**
-   - Lambda env var: `APP_URL` → set to this URL
-   - Frontend `.env`: `VITE_REDIRECT_URI` → set to this URL
-   - **Rebuild and re-upload** after updating `.env`:
-     ```bash
-     npm run build
-     aws s3 sync dist/ s3://YOUR-BUCKET-NAME/dist/ --delete
-     ```
 
-6. Also go to Cognito Console → your User Pool → **App client** → edit the callback URL to this Function URL.
+   a. Lambda env var `APP_URL` → set to the Function URL
+
+   b. Frontend `.env` → set `VITE_REDIRECT_URI` to the Function URL, then rebuild:
+   ```bash
+   npm run build
+   aws s3 sync dist/ s3://YOUR-BUCKET/dist1/ --delete
+   ```
+
+6. Update the Cognito App Client callback URL:
+   Cognito Console → your user pool → **App integration → App clients** → Edit → set callback URL to the Function URL
 
 ---
 
-## GitHub Actions (CI/CD)
+## Step 9 — Verify the Deployment
 
-Pushing to `main` automatically builds and deploys. The workflow file is at `.github/workflows/deploy.yml`.
+```bash
+# 1. Fetch the homepage — should return HTML
+curl https://xxx.lambda-url.us-east-2.on.aws/
+
+# 2. Fetch columns config
+curl https://xxx.lambda-url.us-east-2.on.aws/api/columns-config
+
+# 3. Fetch use case data (unauthenticated — restricted columns will be blank)
+curl https://xxx.lambda-url.us-east-2.on.aws/api/data/use-cases | head -c 500
+
+# 4. Test contact form
+curl -X POST https://xxx.lambda-url.us-east-2.on.aws/api/contact \
+  -H "Content-Type: application/json" \
+  -d '{"from":"test@example.com","subject":"Test","message":"Hello"}'
+```
+
+If any call returns 403 or 500, check Lambda CloudWatch Logs:
+Lambda Console → **Monitor → View CloudWatch logs** → latest log stream.
+
+---
+
+## GitHub Actions CI/CD
+
+Pushing to `main` can automatically build and deploy. The workflow file lives at `.github/workflows/deploy.yml`.
 
 ### Required GitHub Secrets
 
@@ -360,15 +399,16 @@ Go to: **GitHub repo → Settings → Secrets and variables → Actions → New 
 | `AWS_SECRET_ACCESS_KEY` | IAM deploy user secret key |
 | `AWS_REGION` | e.g., `us-east-2` |
 | `S3_BUCKET_NAME` | Your S3 bucket name |
+| `S3_DIST_PREFIX` | e.g., `dist1` |
 | `LAMBDA_FUNCTION_NAME` | e.g., `aiuc-frontend` |
 | `VITE_COGNITO_USER_POOL_ID` | From Step 1 |
 | `VITE_COGNITO_CLIENT_ID` | From Step 1 |
+| `VITE_AWS_REGION` | e.g., `us-east-2` |
 | `VITE_REDIRECT_URI` | Your Lambda Function URL |
-| `VITE_CONTACT_EMAIL` | Contact email for footer |
 
 ### IAM user for GitHub Actions (least-privilege)
 
-Create a dedicated IAM user for CI with this policy:
+Create a dedicated IAM user (`aiuc-github-deploy`) with this inline policy:
 
 ```json
 {
@@ -395,117 +435,161 @@ Create a dedicated IAM user for CI with this policy:
 
 ## Configuring Restricted Columns
 
-Edit **`src/config/restrictedColumns.ts`** — this is the only file you need to change:
+Restricted columns are shown blurred to unauthenticated users on the frontend, and stripped entirely from API responses server-side.
+
+### Method 1: Lambda env vars (no code change, no redeploy needed)
+
+Edit `USE_CASE_RESTRICTED_COLUMNS` and `INDUSTRY_RESTRICTED_COLUMNS` in Lambda Console → Configuration → Environment variables.
+
+```
+USE_CASE_RESTRICTED_COLUMNS = AI Algorithms & Frameworks,Datasets,Action / Implementation
+INDUSTRY_RESTRICTED_COLUMNS = Implementation Plan,Datasets,AI Tools / Platforms
+```
+
+Rules:
+- Comma-separated, **no leading/trailing spaces** around column names
+- Column names are **case-sensitive** — must match the JSON data keys exactly
+- Changes take effect immediately on the next request
+
+### Method 2: Code defaults (requires rebuild + redeploy)
+
+Edit `src/config/restrictedColumns.ts`:
 
 ```typescript
-// Blurred columns in the Case Study table for unauthenticated users
 export const USE_CASE_RESTRICTED_COLUMNS: string[] = [
   "AI Algorithms & Frameworks",
-  "Action / Implementation",
   "Datasets",
-  "AI Tools & Models",
-  // add or remove column names here
-];
-
-// Blurred columns in the Industry Data table
-export const INDUSTRY_RESTRICTED_COLUMNS: string[] = [
-  "Implementation Plan",
-  "Datasets",
-  "AI Tools / Platforms",
-  // add or remove column names here
+  // add / remove entries here
 ];
 ```
 
-Column names must match exactly what appears in the JSON data (case-sensitive). Rebuild and redeploy after changes.
+Then rebuild and re-upload frontend + Lambda.
 
 ---
 
 ## Admin Approval Flow
 
-When a user registers with a work email that isn't whitelisted, Google Gemini classifies the domain:
+When a user with a new work email domain registers:
 
-| AI Confidence | Outcome |
-|---------------|---------|
-| > 80% | Auto-approved — user proceeds to create a Cognito account immediately |
-| 10–80% | User sees "Pending Approval" screen; admin gets an email with Approve + Reject links |
-| < 10% | Auto-rejected — user sees a blocked screen |
+1. User submits the registration form
+2. `POST /api/validate-email` checks the domain — non-personal work domains are allowed
+3. User sees "Pending Approval" screen
+4. Admin receives SES email at `APPROVAL_EMAIL` with Approve and Reject links
 
-**Admin email example (pending review):**
-```
-Subject: [AIUC] Registration — breakfree.com | Needs Review (65%)
+**Approve link** (`GET /api/approve?token=...`):
+- Verifies HMAC signature (`APPROVAL_SECRET`)
+- Checks expiry (7-day TTL embedded in token)
+- Checks S3 `used_tokens/` for replay (one-time use)
+- Sends user an email with a personal registration link
+- User clicks link → bypasses domain approval → completes Cognito signup
 
-Registrant  : Harsh Joshi <harsh@breakfree.com>
-Confidence  : 65%
-Recommended : Review
+**Reject link** (`GET /api/reject?token=...`):
+- Sends user a polite rejection email mentioning `CONTACT_EMAIL` for appeals
 
-  ✅ APPROVE: https://your-lambda-url.on.aws/api/approve?token=...
-  ❌ REJECT:  https://your-lambda-url.on.aws/api/reject?token=...
-```
-
-- **Approve** → user receives an email with their personal registration link (valid 7 days)
-- **Reject** → user receives a polite denial email mentioning `CONTACT_EMAIL` for appeals
-- Both tokens expire after **7 days** — request a new one if expired
+**If the token expires (after 7 days):** The user must re-submit the registration form to trigger a new approval email.
 
 ---
 
 ## Viewing Usage Logs
 
-Every user interaction is logged to DynamoDB automatically.
+Every user action (search, click, filter, row view) is stored in S3.
 
-**In AWS Console:**
-1. [DynamoDB Console](https://console.aws.amazon.com/dynamodb/) → Tables → `aiuc-usage-logs`
-2. Click **Explore table items**
-
-**Events logged:**
-
-| Event | When |
-|-------|------|
-| `page_view` | Every app load |
-| `search` | Every search query |
-| `filter` | Every column filter applied |
-| `click` | Tab switches, button clicks |
-| `column_click` | Column header clicked |
-| `row_click` | Row expanded |
-| `register` | Successful Cognito signup |
-
-Each record has: `eventId`, `timestamp`, `eventType`, `userEmail`, `userName`, `sessionId`, `data`.
-
-**Export all logs:**
-```bash
-aws dynamodb scan \
-  --table-name aiuc-usage-logs \
-  --output json > logs-export.json
+**S3 path structure:**
 ```
+s3://YOUR-BUCKET/logs/
+├── 2025-04-07/
+│   ├── 550e8400-e29b-41d4-a716-446655440000.json
+│   └── ...
+└── 2025-04-08/
+    └── ...
+```
+
+**View in AWS Console:**
+1. S3 Console → your bucket → `logs/` folder → browse by date
+
+**Download for analysis:**
+```bash
+# All logs for a specific date
+aws s3 sync s3://YOUR-BUCKET/logs/2025-04-07/ ./logs-2025-04-07/
+
+# All logs ever
+aws s3 sync s3://YOUR-BUCKET/logs/ ./all-logs/
+```
+
+**Logged event types:** `page_view`, `search`, `filter`, `click`, `column_click`, `row_click`, `register`
+
+Each log file contains: `eventId`, `timestamp`, `eventType`, `userEmail`, `userName`, `sessionId`, `data`
+
+---
+
+## Redeployment Cheatsheet
+
+### Only frontend changed (React/TypeScript code, `.env` values)
+
+```bash
+npm run build
+aws s3 sync dist/ s3://YOUR-BUCKET/dist1/ --delete
+```
+
+### Only Lambda changed (`lambda/index.mjs` or `lambda/server.mjs`)
+
+```bash
+cd lambda && npm install --omit=dev && zip -r ../lambda.zip . && cd ..
+aws lambda update-function-code --function-name aiuc-frontend --zip-file fileb://lambda.zip
+```
+
+### Both changed
+
+```bash
+# Build frontend
+npm run build
+aws s3 sync dist/ s3://YOUR-BUCKET/dist1/ --delete
+
+# Package and deploy Lambda
+cd lambda && npm install --omit=dev && zip -r ../lambda.zip . && cd ..
+aws lambda update-function-code --function-name aiuc-frontend --zip-file fileb://lambda.zip
+```
+
+### Only restricted columns changed (no code change needed)
+
+Edit `USE_CASE_RESTRICTED_COLUMNS` or `INDUSTRY_RESTRICTED_COLUMNS` in Lambda Console → Environment variables → Save. Done — no redeploy required.
 
 ---
 
 ## Troubleshooting
 
-### Blurred columns still show after registration
-The Cognito session check is async. Wait for the orange spinner to disappear — it checks session on every load. If it persists, clear `localStorage` in browser devtools and reload.
+### Lambda returns 403 on all requests
+The Function URL policy may be missing. Lambda Console → Configuration → Permissions → Resource-based policy:
+- Add statement: Principal `*`, Action `lambda:InvokeFunctionUrl`, Auth type `NONE`
 
-### Emails not sending
-- Check `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` in Lambda env vars
-- For Gmail, `SMTP_PASS` must be an **App Password** (16 chars with spaces), not your account password
-- Check Lambda CloudWatch logs: **Lambda Console → Monitor → View CloudWatch logs**
+### Lambda returns 500 on `/api/data/*`
+- Check `BUCKET_NAME` and `S3_REGION` in Lambda env vars
+- Check `DIST_PREFIX` — must match the S3 folder you uploaded `dist/` into
+- Ensure Lambda execution role has `s3:GetObject` on your bucket (Step 5)
+- View CloudWatch logs for the specific error
 
-### Registration link in approval email points to localhost
-Update `APP_URL` in Lambda env vars to your Lambda Function URL (not localhost).
+### SES "MessageRejected: Email address not verified"
+- Verify `SES_FROM_EMAIL` in SES Console (must be same region as `SES_REGION`)
+- In sandbox mode: recipient addresses must also be verified
+- Request SES production access to send unrestricted
 
-### Lambda returns 500 on /api/validate-email
-- Verify `GEMINI_API_KEY` is set and valid
-- Lambda timeout may be too short — ensure it's set to 60 seconds
+### Approval emails contain localhost in links
+Set `APP_URL` in Lambda env vars to the Lambda Function URL (not localhost).
 
-### Lambda Function URL returns 403
-The resource-based policy may be missing. In Lambda Console:
-- **Configuration → Permissions → Resource-based policy statements → Add permissions**
-- Principal: `*`, Action: `lambda:InvokeFunctionUrl`, Auth type: `NONE`
+### Authenticated users still see blurred columns
+- `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` in Lambda env vars must match the values used when the frontend was built (`VITE_COGNITO_*` in `.env`)
+- Rebuild frontend if Cognito pool was recreated
 
-### DynamoDB PutItem AccessDenied in logs
-The Lambda execution role is missing `dynamodb:PutItem`. Re-apply the inline policy from [Step 5](#step-5--lambda-iam-permissions).
+### S3 `AccessDenied` on `s3:PutObject` (logs or token replay)
+Lambda execution role is missing `s3:PutObject`. Update the inline policy in IAM Console (Step 5).
 
-### Local dev — /api returns "connection refused"
-Ensure `npm run dev:api` is running in a second terminal. Check `lambda/.env` exists and has valid values.
+### Cold start latency (first request is slow)
+Increase Lambda memory (Configuration → General → Memory → 512 MB). Higher memory = faster CPU = shorter cold start. Cost difference is negligible at this scale.
+
+### Registration approval email not received
+- Check `APPROVAL_EMAIL` is set correctly in Lambda env vars
+- In SES sandbox: `APPROVAL_EMAIL` must also be a verified identity
+- Check Lambda CloudWatch logs for SES errors after a registration attempt
 
 ---
 

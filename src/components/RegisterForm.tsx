@@ -13,6 +13,7 @@ import {
     CssBaseline,
     IconButton,
     InputAdornment,
+    Link,
     Paper,
     TextField,
     Typography,
@@ -62,6 +63,7 @@ function cognitoSignUp(
             new CognitoUserAttribute({ Name: "email", Value: email }),
             new CognitoUserAttribute({ Name: "name", Value: name }),
         ];
+        if (!userPool) { reject(new Error("Cognito is not configured")); return; }
         userPool.signUp(email, password, attributes, [], (err, result) => {
             if (err || !result) {
                 reject(err ?? new Error("signUp returned no result"));
@@ -85,6 +87,7 @@ function cognitoConfirm(cognitoUser: CognitoUser, code: string): Promise<void> {
 /** Sign in after confirmation so App.tsx can detect a valid Cognito session */
 function cognitoSignIn(email: string, password: string): Promise<void> {
     return new Promise((resolve, reject) => {
+        if (!userPool) { reject(new Error("Cognito is not configured")); return; }
         const user = new CognitoUser({ Username: email, Pool: userPool });
         const authDetails = new AuthenticationDetails({ Username: email, Password: password });
         user.authenticateUser(authDetails, {
@@ -449,8 +452,22 @@ export default function RegisterForm() {
             </Box>
 
             <Typography
+                variant="body2"
+                sx={{ mt: 3, textAlign: "center", color: "#666" }}
+            >
+                Already registered?{" "}
+                <Link
+                    href="/login"
+                    underline="hover"
+                    sx={{ color: PURE_ORANGE, fontWeight: 500 }}
+                >
+                    Sign in
+                </Link>
+            </Typography>
+
+            <Typography
                 variant="caption"
-                sx={{ display: "block", mt: 3, color: "#999", textAlign: "center" }}
+                sx={{ display: "block", mt: 1.5, color: "#999", textAlign: "center" }}
             >
                 Confidential — Internal Use Only
             </Typography>

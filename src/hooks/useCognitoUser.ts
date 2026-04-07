@@ -15,8 +15,13 @@ export function useCognitoUser(): CognitoUserInfo {
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
+    if (!userPool) {
+      console.warn("[useCognitoUser] Cognito not configured — running without auth");
+      setIsChecking(false);
+      return;
+    }
+
     const user = userPool.getCurrentUser();
-    console.log("[useCognitoUser] getCurrentUser →", user ? user.getUsername() : "null (no session)");
 
     if (!user) {
       setIsChecking(false);
@@ -28,12 +33,9 @@ export function useCognitoUser(): CognitoUserInfo {
         console.warn("[useCognitoUser] getSession error:", err.message);
       } else if (session?.isValid()) {
         const payload = session.getIdToken().decodePayload();
-        console.log("[useCognitoUser] valid session — email:", payload.email, "name:", payload.name);
         setUserName((payload.name as string) || (payload.email as string) || "");
         setUserEmail((payload.email as string) || "");
         setIsRegistered(true);
-      } else {
-        console.warn("[useCognitoUser] session invalid or null");
       }
       setIsChecking(false);
     });

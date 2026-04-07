@@ -20,6 +20,7 @@ import { useS3Data } from "./hooks/useS3Data";
 import { useCognitoUser } from "./hooks/useCognitoUser";
 import { useLogger } from "./hooks/useLogger";
 import { APP_CONFIG } from "./config/appConfig";
+import { userPool } from "./config/cognito";
 import "./globals.css";
 
 function App() {
@@ -31,7 +32,7 @@ function App() {
   // Log page view on mount
   useEffect(() => {
     logPageView();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const {
@@ -70,15 +71,22 @@ function App() {
               justifyContent: "space-between",
             }}
           >
-            {/* Pure Storage Logo */}
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Logo
-                src="/assets/purelogo.png"
-                alt="Pure Storage"
-                width={300}
-                height={60}
-                fallbackText="PURESTORAGE"
-              />
+            {/* Spearhead Logo */}
+            <Box sx={{ display: "flex", alignItems: "center" }}>
+              <Link
+                href="https://spearhead.so"
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{ display: "flex", alignItems: "center", lineHeight: 0 }}
+              >
+                <Logo
+                  src="/assets/spearhead.png"
+                  alt="Spearhead"
+                  width={160}
+                  height={48}
+                  fallbackText="SPEARHEAD"
+                />
+              </Link>
             </Box>
 
             {/* Title */}
@@ -92,9 +100,9 @@ function App() {
               }}
             >
               <Typography
-                variant="h6"
-                component="h6"
-                sx={{ color: "#1a1a1a", fontWeight: 600, fontSize: "1.25rem" }}
+                variant="h5"
+                component="h1"
+                sx={{ color: "#1a1a1a", fontWeight: 700, fontSize: "1.6rem", letterSpacing: "-0.01em" }}
               >
                 AI Use Case Repository
               </Typography>
@@ -103,29 +111,67 @@ function App() {
             {/* User area */}
             <Box sx={{ minWidth: 180, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 1.5 }}>
               {isChecking ? null : isRegistered ? (
-                <Typography
-                  variant="body2"
-                  sx={{ color: "#1a1a1a", fontWeight: 500, fontSize: "0.9rem" }}
-                >
-                  Hello, <strong>{userName || userEmail}</strong>
-                </Typography>
+                <>
+                  <Typography
+                    variant="body2"
+                    sx={{ color: "#1a1a1a", fontWeight: 500, fontSize: "0.9rem" }}
+                  >
+                    Hello, <strong>{userName || userEmail}</strong>
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => {
+                      userPool?.getCurrentUser()?.signOut();
+                      window.location.replace("/login");
+                    }}
+                    sx={{
+                      borderColor: PURE_ORANGE,
+                      color: PURE_ORANGE,
+                      textTransform: "none",
+                      fontSize: "0.8rem",
+                      boxShadow: "none",
+                      "&:hover": { borderColor: "#cc4000", color: "#cc4000", boxShadow: "none" },
+                    }}
+                  >
+                    Logout
+                  </Button>
+                </>
               ) : (
-                <Button
-                  component="a"
-                  href="/register"
-                  size="small"
-                  variant="contained"
-                  sx={{
-                    backgroundColor: PURE_ORANGE,
-                    color: "#fff",
-                    textTransform: "none",
-                    fontSize: "0.8rem",
-                    boxShadow: "none",
-                    "&:hover": { backgroundColor: "#cc4000", boxShadow: "none" },
-                  }}
-                >
-                  Register for Full Access
-                </Button>
+                <>
+                  <Button
+                    component="a"
+                    href="/login"
+                    size="small"
+                    variant="outlined"
+                    sx={{
+                      borderColor: PURE_ORANGE,
+                      color: PURE_ORANGE,
+                      textTransform: "none",
+                      fontSize: "0.8rem",
+                      boxShadow: "none",
+                      "&:hover": { borderColor: "#cc4000", color: "#cc4000", boxShadow: "none" },
+                    }}
+                  >
+                    Login
+                  </Button>
+                  <Button
+                    component="a"
+                    href="/register"
+                    size="small"
+                    variant="contained"
+                    sx={{
+                      backgroundColor: PURE_ORANGE,
+                      color: "#fff",
+                      textTransform: "none",
+                      fontSize: "0.8rem",
+                      boxShadow: "none",
+                      "&:hover": { backgroundColor: "#cc4000", boxShadow: "none" },
+                    }}
+                  >
+                    Register
+                  </Button>
+                </>
               )}
             </Box>
           </Box>
@@ -201,29 +247,40 @@ function App() {
         >
           {/* Left side - Powered by */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flex: 1 }}>
-            <Typography
+            {/* <Typography
               variant="body2"
               sx={{ color: "#666666", fontSize: "0.75rem" }}
             >
               Powered by
             </Typography>
-            <Logo
-              src="/assets/spearhead.png"
-              alt="Spearhead"
-              width={100}
-              height={50}
-              fallbackText=""
-            />
+            <Link
+              href="https://spearhead.so"
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{ display: "flex", alignItems: "center", lineHeight: 0 }}
+            >
+              <Logo
+                src="/assets/spearhead.png"
+                alt="Spearhead"
+                width={100}
+                height={50}
+                fallbackText=""
+              />
+            </Link> */}
           </Box>
 
-          {/* Center - Confidential + Contact */}
-          <Box sx={{ flex: 1, display: "flex", justifyContent: "center", gap: 3, alignItems: "center" }}>
+          {/* Center - Confidential */}
+          <Box sx={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center" }}>
             <Typography
               variant="body2"
               sx={{ color: "#666666", fontSize: "0.75rem", fontWeight: 500 }}
             >
               Confidential - Internal Use Only
             </Typography>
+          </Box>
+
+          {/* Right side - Contact Us */}
+          <Box sx={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
             <Link
               href={`mailto:${APP_CONFIG.contactEmail}`}
               underline="hover"
@@ -240,18 +297,6 @@ function App() {
               <EmailIcon sx={{ fontSize: 14 }} />
               Contact Us
             </Link>
-          </Box>
-
-          {/* Right side - Row count */}
-          <Box sx={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
-            <Typography
-              variant="body2"
-              sx={{ color: "#666666", fontSize: "0.75rem", fontWeight: 500 }}
-            >
-              {activeTab === 0
-                ? `${useCaseData.length} use cases`
-                : `${industryData.length} industry records`}
-            </Typography>
           </Box>
         </Box>
       </Box>

@@ -1,17 +1,15 @@
-import { createHmac } from "crypto";
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { createHmac, createHash, timingSafeEqual } from "crypto";
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
-import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import nodemailer from "nodemailer";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { CognitoJwtVerifier } from "aws-jwt-verify";
 
 const s3 = new S3Client({ region: process.env.S3_REGION });
 const secretsManager = new SecretsManagerClient({ region: process.env.S3_REGION || process.env.AWS_REGION });
-const dynamodb = new DynamoDBClient({ region: process.env.S3_REGION || process.env.AWS_REGION });
-const geminiClient = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const ses = new SESClient({ region: process.env.SES_REGION || process.env.AWS_REGION });
 const BUCKET = process.env.BUCKET_NAME;
 const DIST_PREFIX = process.env.DIST_PREFIX;
-const LOG_TABLE = process.env.LOG_TABLE_NAME || "aiuc-usage-logs";
+const LOG_PREFIX = process.env.LOG_PREFIX || "logs";
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "aiuc@purestorage.com";
 const APPROVAL_EMAIL = process.env.APPROVAL_EMAIL || CONTACT_EMAIL;
 const APP_URL = (process.env.APP_URL || "").replace(/\/$/, "");
@@ -30,15 +28,70 @@ const BLOCKED_DOMAINS = new Set([
     "msn.com",
 ]);
 
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || "smtp.gmail.com",
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    secure: false,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-    },
-});
+const SES_FROM = process.env.SES_FROM_EMAIL;
+
+// ── Cognito JWT verifier (E4: server-side data filtering) ─────────────────────
+const cognitoVerifier = process.env.COGNITO_USER_POOL_ID && process.env.COGNITO_CLIENT_ID
+    ? CognitoJwtVerifier.create({
+        userPoolId: process.env.COGNITO_USER_POOL_ID,
+        tokenUse: "id",
+        clientId: process.env.COGNITO_CLIENT_ID,
+    })
+    : null;
+
+async function isRequestAuthenticated(event) {
+    if (!cognitoVerifier) return false;
+    const authHeader = event.headers?.authorization || event.headers?.Authorization || "";
+    if (!authHeader.startsWith("Bearer ")) return false;
+    try {
+        await cognitoVerifier.verify(authHeader.slice(7));
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+// Display name → JSON key mapping for server-side column stripping
+const USE_CASE_COLUMN_KEYS = {
+    "AI Algorithms & Frameworks": "ai_algorithms_frameworks",
+    "Datasets": "datasets",
+    "Action / Implementation": "action_implementation",
+    "AI Tools & Models": "ai_tools_models",
+    "Digital Platforms and Tools": "digital_platforms_and_tools",
+    "Expected Outcomes and Results": "expected_outcomes_and_results",
+};
+const INDUSTRY_COLUMN_KEYS = {
+    "Implementation Plan": "implementation_plan",
+    "Datasets": "datasets",
+    "AI Tools / Platforms": "ai_tools_platforms",
+    "Digital Tools / Platforms": "digital_tools_platforms",
+    "AI Frameworks": "ai_frameworks",
+    "AI Tools and Models": "ai_tools_and_models",
+    "Industry References": "industry_references",
+};
+
+function stripRestrictedColumns(rows, restrictedNames, columnKeyMap) {
+    const keysToBlank = restrictedNames.map((n) => columnKeyMap[n]).filter(Boolean);
+    if (keysToBlank.length === 0) return rows;
+    return rows.map((row) => {
+        const out = { ...row };
+        keysToBlank.forEach((k) => { out[k] = ""; });
+        return out;
+    });
+}
+
+async function sendEmail({ to, subject, text, replyTo }) {
+    const params = {
+        Source: SES_FROM,
+        Destination: { ToAddresses: [to] },
+        Message: {
+            Subject: { Data: subject },
+            Body: { Text: { Data: text } },
+        },
+        ...(replyTo ? { ReplyToAddresses: [replyTo] } : {}),
+    };
+    await ses.send(new SendEmailCommand(params));
+}
 
 /**
  * MIME type mapping for static assets
@@ -72,15 +125,12 @@ function getMimeType(key) {
  */
 async function getS3Object(key, contentType) {
     try {
+        const isBinary = contentType.startsWith("image/") || contentType.startsWith("font/");
         const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
         const response = await s3.send(command);
-        const body = await response.Body.transformToString();
-
-        // For binary assets (images, fonts), return base64 encoded
-        const isBinary = contentType.startsWith("image/") || contentType.startsWith("font/");
 
         if (isBinary) {
-            const bodyBytes = await (await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))).Body.transformToByteArray();
+            const bodyBytes = await response.Body.transformToByteArray();
             return {
                 statusCode: 200,
                 headers: {
@@ -92,6 +142,7 @@ async function getS3Object(key, contentType) {
             };
         }
 
+        const body = await response.Body.transformToString();
         return {
             statusCode: 200,
             headers: {
@@ -143,70 +194,17 @@ function verifyApprovalToken(token) {
     const payload = token.slice(0, dotIdx);
     const sig = token.slice(dotIdx + 1);
     const expected = createHmac("sha256", APPROVAL_SECRET).update(payload).digest("hex");
-    if (sig !== expected) return null;
+    try {
+        if (!timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"))) return null;
+    } catch {
+        return null; // invalid hex (wrong length, bad chars)
+    }
     try {
         const data = JSON.parse(Buffer.from(payload, "base64url").toString());
         if (Date.now() > data.exp) return null; // expired
         return data;
     } catch {
         return null;
-    }
-}
-
-/**
- * Classify an email domain using Gemini to determine if it is an enterprise domain.
- * Returns { confidence, isEnterprise, reasoning, recommendation } or safe defaults on error.
- */
-async function checkDomainWithGemini(domain) {
-    const safeDefault = {
-        confidence: 0,
-        isEnterprise: false,
-        reasoning: "Classification unavailable — AI service error",
-        recommendation: "Review",
-    };
-
-    if (!process.env.GEMINI_API_KEY) {
-        console.warn("[checkDomainWithGemini] GEMINI_API_KEY not set — skipping AI check");
-        return safeDefault;
-    }
-
-    const prompt = `You are an email domain classifier. Determine if this domain belongs to a business or enterprise organization.
-
-Domain: ${domain}
-
-Respond with ONLY valid JSON (no markdown code fences, no extra text before or after):
-{
-  "confidence": <integer 0-100>,
-  "isEnterprise": <true or false>,
-  "reasoning": "<one concise sentence>",
-  "recommendation": "<Approve, Review, or Reject>"
-}
-
-Rules:
-- confidence > 80  → clearly enterprise (company, university, government, NGO) → "Approve"
-- confidence 50–80 → ambiguous, needs human review → "Review"
-- confidence < 50  → likely personal or suspicious → "Reject"`;
-
-    try {
-        const model = geminiClient.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
-        const result = await model.generateContent(prompt);
-        const text = result.response.text().trim();
-
-        // Strip markdown fences if Gemini wraps the JSON anyway
-        const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-        const parsed = JSON.parse(cleaned);
-
-        return {
-            confidence:    typeof parsed.confidence    === "number"  ? parsed.confidence    : 0,
-            isEnterprise:  typeof parsed.isEnterprise  === "boolean" ? parsed.isEnterprise  : false,
-            reasoning:     typeof parsed.reasoning     === "string"  ? parsed.reasoning     : "No reasoning provided",
-            recommendation: ["Approve", "Review", "Reject"].includes(parsed.recommendation)
-                ? parsed.recommendation
-                : "Review",
-        };
-    } catch (err) {
-        console.error("[checkDomainWithGemini] Error:", err.message);
-        return safeDefault;
     }
 }
 
@@ -220,12 +218,57 @@ export async function handler(event) {
 
     console.log(`[Request] ${method} ${path}`);
 
-    // --- Data API routes ---
+    // --- Columns config route (lets admin control which columns are greyed out via env vars) ---
+    if (path === "/api/columns-config" || path === "/api/columns-config/") {
+        const useCaseRestricted = process.env.USE_CASE_RESTRICTED_COLUMNS
+            ? process.env.USE_CASE_RESTRICTED_COLUMNS.split(",").map((s) => s.trim()).filter(Boolean)
+            : ["AI Algorithms & Frameworks", "Datasets", "Action / Implementation", "AI Tools & Models", "Digital Platforms and Tools"];
+        const industryRestricted = process.env.INDUSTRY_RESTRICTED_COLUMNS
+            ? process.env.INDUSTRY_RESTRICTED_COLUMNS.split(",").map((s) => s.trim()).filter(Boolean)
+            : ["Implementation Plan", "Datasets", "AI Tools / Platforms", "Digital Tools / Platforms", "AI Frameworks", "AI Tools and Models", "Industry References"];
+        return {
+            statusCode: 200,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ useCaseRestricted, industryRestricted }),
+        };
+    }
+
+    // --- Data API routes (with server-side column filtering for unauthenticated users) ---
     if (path === "/api/data/use-cases" || path === "/api/data/use-cases/") {
-        return getS3Object("use_cases.json", "application/json");
+        try {
+            const authenticated = await isRequestAuthenticated(event);
+            const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: "use_cases.json" });
+            const res = await s3.send(cmd);
+            let rows = JSON.parse(await res.Body.transformToString());
+            if (!authenticated) {
+                const restricted = process.env.USE_CASE_RESTRICTED_COLUMNS
+                    ? process.env.USE_CASE_RESTRICTED_COLUMNS.split(",").map((s) => s.trim()).filter(Boolean)
+                    : Object.keys(USE_CASE_COLUMN_KEYS);
+                rows = stripRestrictedColumns(rows, restricted, USE_CASE_COLUMN_KEYS);
+            }
+            return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(rows) };
+        } catch (err) {
+            console.error("[data/use-cases] error:", err.message);
+            return { statusCode: 500, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Failed to load data" }) };
+        }
     }
     if (path === "/api/data/industry" || path === "/api/data/industry/") {
-        return getS3Object("industry_use_cases.json", "application/json");
+        try {
+            const authenticated = await isRequestAuthenticated(event);
+            const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: "industry_use_cases.json" });
+            const res = await s3.send(cmd);
+            let rows = JSON.parse(await res.Body.transformToString());
+            if (!authenticated) {
+                const restricted = process.env.INDUSTRY_RESTRICTED_COLUMNS
+                    ? process.env.INDUSTRY_RESTRICTED_COLUMNS.split(",").map((s) => s.trim()).filter(Boolean)
+                    : Object.keys(INDUSTRY_COLUMN_KEYS);
+                rows = stripRestrictedColumns(rows, restricted, INDUSTRY_COLUMN_KEYS);
+            }
+            return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(rows) };
+        } catch (err) {
+            console.error("[data/industry] error:", err.message);
+            return { statusCode: 500, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Failed to load data" }) };
+        }
     }
 
     // --- Config API route ---
@@ -290,8 +333,7 @@ export async function handler(event) {
                 };
             }
 
-            await transporter.sendMail({
-                from: process.env.SMTP_FROM,
+            await sendEmail({
                 to: CONTACT_EMAIL,
                 replyTo: from,
                 subject,
@@ -336,8 +378,7 @@ export async function handler(event) {
         const regLink = `${APP_URL}/register?token=${encodeURIComponent(regToken)}`;
 
         try {
-            await transporter.sendMail({
-                from: process.env.SMTP_FROM,
+            await sendEmail({
                 to: payload.email,
                 subject: "You're approved — complete your registration for AI Use Case Repository",
                 text: [
@@ -392,8 +433,7 @@ export async function handler(event) {
         }
 
         try {
-            await transporter.sendMail({
-                from: process.env.SMTP_FROM,
+            await sendEmail({
                 to: payload.email,
                 subject: "Update on your AI Use Case Repository access request",
                 text: [
@@ -439,7 +479,26 @@ export async function handler(event) {
             if (token) {
                 const payload = verifyApprovalToken(token);
                 if (payload && payload.email.toLowerCase() === (email || "").trim().toLowerCase()) {
-                    console.log(`[validate-email] Token approved for ${email}`);
+                    // B11: Token replay protection — reject already-used tokens
+                    const tokenHash = createHash("sha256").update(token).digest("hex");
+                    const usedKey = `used_tokens/${tokenHash}`;
+                    try {
+                        await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: usedKey }));
+                        // Token already exists in S3 → it was already used
+                        return {
+                            statusCode: 200,
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ allowed: false, reason: "token_already_used" }),
+                        };
+                    } catch {
+                        // Token not found → mark it as used now
+                        await s3.send(new PutObjectCommand({
+                            Bucket: BUCKET,
+                            Key: usedKey,
+                            Body: new Date().toISOString(),
+                            ContentType: "text/plain",
+                        }));
+                    }
                     return {
                         statusCode: 200,
                         headers: { "Content-Type": "application/json" },
@@ -470,21 +529,7 @@ export async function handler(event) {
                 };
             }
 
-            // 1. Check whitelist (comma-separated env var, e.g. "company1.com,company2.com")
-            const whitelist = (process.env.WHITELIST_DOMAINS || "")
-                .split(",")
-                .map(d => d.trim().toLowerCase())
-                .filter(Boolean);
-
-            if (whitelist.includes(domain)) {
-                return {
-                    statusCode: 200,
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ allowed: true }),
-                };
-            }
-
-            // 2. Block known personal email providers — no notification sent
+            // 1. Block known personal email providers — no notification sent
             if (BLOCKED_DOMAINS.has(domain)) {
                 return {
                     statusCode: 200,
@@ -493,70 +538,12 @@ export async function handler(event) {
                 };
             }
 
-            // 3. Unknown domain — ask Gemini to classify it
-            const aiResult = await checkDomainWithGemini(domain);
-            const { confidence } = aiResult;
-
-            // Tier thresholds:
-            //   > 80%  → auto-approve (full registration, no human needed)
-            //   10–80% → pending human review
-            //   < 10%  → reject
-            const autoApprove   = confidence > 80;
-            const pendingReview = confidence >= 10 && confidence <= 80;
-
-            console.log(`[validate-email] domain=${domain} confidence=${confidence} recommendation=${aiResult.recommendation} autoApprove=${autoApprove} pendingReview=${pendingReview}`);
-
-            // Generate signed tokens for approve and reject links
-            const approvalToken = generateApprovalToken(email, domain, name || "");
-            const approveLink = `${APP_URL}/api/approve?token=${encodeURIComponent(approvalToken)}`;
-            const rejectLink  = `${APP_URL}/api/reject?token=${encodeURIComponent(approvalToken)}`;
-
-            // Notify approval alias for all non-trivial outcomes
-            await transporter.sendMail({
-                from: process.env.SMTP_FROM,
-                to: APPROVAL_EMAIL,
-                subject: `[AIUC] Registration — ${domain} | ${autoApprove ? "Auto-Approved" : pendingReview ? "Needs Review" : "Rejected"} (${confidence}%)`,
-                text: [
-                    "A new user has requested access to the AI Use Case Repository.",
-                    "",
-                    `Registrant  : ${name || "Not provided"} <${email}>`,
-                    `Domain      : ${domain}`,
-                    `Confidence  : ${confidence}%`,
-                    `Enterprise  : ${aiResult.isEnterprise ? "Yes" : "No"}`,
-                    `AI Reasoning: ${aiResult.reasoning}`,
-                    `Recommended : ${aiResult.recommendation}`,
-                    "",
-                    autoApprove
-                        ? "✅ Access GRANTED automatically (confidence > 80%). No action needed."
-                        : pendingReview
-                            ? `⏳ Access PENDING — take action:\n\n  ✅ APPROVE: ${approveLink}\n\n  ❌ REJECT:  ${rejectLink}`
-                            : `❌ Auto-REJECTED (confidence < 10%).\nTo override:\n\n  ✅ APPROVE: ${approveLink}\n\n  ❌ REJECT:  ${rejectLink}`,
-                ].join("\n"),
-            });
-
-            // > 80%: allow with no pendingApproval — RegisterForm proceeds straight to Cognito signup
-            if (autoApprove) {
-                return {
-                    statusCode: 200,
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ allowed: true }),
-                };
-            }
-
-            // 10–80%: allow through domain check but flag as pending — RegisterForm shows "pending" screen
-            if (pendingReview) {
-                return {
-                    statusCode: 200,
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ allowed: true, pendingApproval: true }),
-                };
-            }
-
-            // < 10%: block
+            // 2. Any non-personal domain is allowed
+            console.log(`[validate-email] Non-personal domain allowed: ${domain}`);
             return {
                 statusCode: 200,
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ allowed: false }),
+                body: JSON.stringify({ allowed: true }),
             };
         } catch (err) {
             console.error("Email validation error:", err);
@@ -585,18 +572,23 @@ export async function handler(event) {
 
             const eventId = crypto.randomUUID();
             const ts = timestamp || new Date().toISOString();
+            const date = ts.slice(0, 10); // YYYY-MM-DD
 
-            await dynamodb.send(new PutItemCommand({
-                TableName: LOG_TABLE,
-                Item: {
-                    eventId:   { S: eventId },
-                    timestamp: { S: ts },
-                    eventType: { S: eventType },
-                    userEmail: { S: userEmail || "anonymous" },
-                    userName:  { S: userName  || "anonymous" },
-                    sessionId: { S: sessionId || "unknown" },
-                    data:      { S: JSON.stringify(data || {}) },
-                },
+            const logEntry = {
+                eventId,
+                timestamp: ts,
+                eventType,
+                userEmail: userEmail || "anonymous",
+                userName:  userName  || "anonymous",
+                sessionId: sessionId || "unknown",
+                data:      data || {},
+            };
+
+            await s3.send(new PutObjectCommand({
+                Bucket: BUCKET,
+                Key: `${LOG_PREFIX}/${date}/${eventId}.json`,
+                Body: JSON.stringify(logEntry),
+                ContentType: "application/json",
             }));
 
             return {

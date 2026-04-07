@@ -14,8 +14,6 @@ export const USE_CASE_RESTRICTED_COLUMNS: string[] = [
   "Datasets",
   "AI Tools & Models",
   "Digital Platforms and Tools",
-  "Expected Outcomes and Results",
-  // ""
 ];
 
 export const INDUSTRY_RESTRICTED_COLUMNS: string[] = [
