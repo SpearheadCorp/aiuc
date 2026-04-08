@@ -16,7 +16,7 @@ export default function Logo({ src, alt, width = 120, height = 32, fallbackText 
     return (
       <Typography
         sx={{
-          color: '#fe5000',
+          color: '#2D89EF',
           fontWeight: 700,
           fontSize: '1rem',
           letterSpacing: '0.1em',

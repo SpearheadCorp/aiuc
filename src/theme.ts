@@ -1,15 +1,15 @@
 import { createTheme } from "@mui/material/styles";
 
-// Pure Storage theme color
-export const PURE_ORANGE = "#fe5000";
+// Spearhead theme color
+export const PURE_ORANGE = "#2D89EF";
 
 export const theme = createTheme({
     palette: {
         mode: "light",
         primary: {
             main: PURE_ORANGE,
-            light: "#ff7a33",
-            dark: "#cc4000",
+            light: "#5ca8f4",
+            dark: "#1a6bbf",
             contrastText: "#ffffff",
         },
         background: {
@@ -41,14 +41,14 @@ export const theme = createTheme({
         MuiChip: {
             styleOverrides: {
                 root: {
-                    backgroundColor: "#fff5f2",
+                    backgroundColor: "#f0f6ff",
                     color: "#1a1a1a",
                     border: `1px solid ${PURE_ORANGE}`,
                     margin: "2px",
                     height: "24px",
                     fontSize: "0.75rem",
                     "&:hover": {
-                        backgroundColor: "#ffe8e0",
+                        backgroundColor: "#d6e8fc",
                         borderColor: PURE_ORANGE,
                     },
                 },

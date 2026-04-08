@@ -131,7 +131,7 @@ function App() {
                       textTransform: "none",
                       fontSize: "0.8rem",
                       boxShadow: "none",
-                      "&:hover": { borderColor: "#cc4000", color: "#cc4000", boxShadow: "none" },
+                      "&:hover": { borderColor: "#1a6bbf", color: "#1a6bbf", boxShadow: "none" },
                     }}
                   >
                     Logout
@@ -150,7 +150,7 @@ function App() {
                       textTransform: "none",
                       fontSize: "0.8rem",
                       boxShadow: "none",
-                      "&:hover": { borderColor: "#cc4000", color: "#cc4000", boxShadow: "none" },
+                      "&:hover": { borderColor: "#1a6bbf", color: "#1a6bbf", boxShadow: "none" },
                     }}
                   >
                     Login
@@ -166,7 +166,7 @@ function App() {
                       textTransform: "none",
                       fontSize: "0.8rem",
                       boxShadow: "none",
-                      "&:hover": { backgroundColor: "#cc4000", boxShadow: "none" },
+                      "&:hover": { backgroundColor: "#1a6bbf", boxShadow: "none" },
                     }}
                   >
                     Register
@@ -291,7 +291,7 @@ function App() {
                 color: PURE_ORANGE,
                 fontSize: "0.75rem",
                 fontWeight: 500,
-                "&:hover": { color: "#cc4000" },
+                "&:hover": { color: "#1a6bbf" },
               }}
             >
               <EmailIcon sx={{ fontSize: 14 }} />

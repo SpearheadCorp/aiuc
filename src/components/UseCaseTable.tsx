@@ -53,7 +53,7 @@ import { useColumnsConfig } from "../hooks/useColumnsConfig";
 import { APP_CONFIG } from "../config/appConfig";
 import LockIcon from "@mui/icons-material/Lock";
 
-const PURE_ORANGE = "#fe5000";
+const PURE_ORANGE = "#2D89EF";
 
 const EMPTY_SET = new Set<string>();
 const DEFAULT_FILTER = {
@@ -880,7 +880,7 @@ export default function UseCaseTable({
             color: PURE_ORANGE,
             borderColor: PURE_ORANGE,
             "&:hover": {
-              borderColor: "#cc4000",
+              borderColor: "#1a6bbf",
               backgroundColor: "#fff5f2",
             },
             "&.Mui-disabled": {
@@ -928,7 +928,7 @@ export default function UseCaseTable({
               textTransform: "none",
               fontSize: "0.8rem",
               boxShadow: "none",
-              "&:hover": { backgroundColor: "#cc4000", boxShadow: "none" },
+              "&:hover": { backgroundColor: "#1a6bbf", boxShadow: "none" },
             }}
           >
             Register Now
@@ -1364,7 +1364,7 @@ const FilterPopup = ({
             disabled={!hasChanges}
             sx={{
               backgroundColor: PURE_ORANGE,
-              "&:hover": { backgroundColor: "#cc4000" },
+              "&:hover": { backgroundColor: "#1a6bbf" },
               "&.Mui-disabled": { backgroundColor: "#ccc" },
             }}
           >

@@ -115,11 +115,11 @@ function PageWrapper({ children }: { children: React.ReactNode }) {
                 <Paper sx={{ p: 5, maxWidth: 460, width: "100%" }}>
                     <Box sx={{ mb: 3, display: "flex", justifyContent: "center" }}>
                         <Logo
-                            src="/assets/purelogo.png"
-                            alt="Pure Storage"
+                            src="/assets/spearhead.png"
+                            alt="Spearhead"
                             width={200}
                             height={40}
-                            fallbackText="PURESTORAGE"
+                            fallbackText="SPEARHEAD"
                         />
                     </Box>
                     {children}
@@ -528,8 +528,8 @@ function SubmitButton({
             sx={{
                 mt: 1,
                 backgroundColor: PURE_ORANGE,
-                "&:hover": { backgroundColor: "#cc4000" },
-                "&:disabled": { backgroundColor: "#ffb899" },
+                "&:hover": { backgroundColor: "#1a6bbf" },
+                "&:disabled": { backgroundColor: "#a8cff8" },
                 textTransform: "none",
                 fontWeight: 600,
                 height: 40,

@@ -125,11 +125,11 @@ export default function ForgotPasswordForm() {
                 <Paper sx={{ p: 5, maxWidth: 460, width: "100%" }}>
                     <Box sx={{ mb: 3, display: "flex", justifyContent: "center" }}>
                         <Logo
-                            src="/assets/purelogo.png"
-                            alt="Pure Storage"
+                            src="/assets/spearhead.png"
+                            alt="Spearhead"
                             width={200}
                             height={40}
-                            fallbackText="PURESTORAGE"
+                            fallbackText="SPEARHEAD"
                         />
                     </Box>
 
@@ -168,8 +168,8 @@ export default function ForgotPasswordForm() {
                                     sx={{
                                         mt: 1,
                                         backgroundColor: PURE_ORANGE,
-                                        "&:hover": { backgroundColor: "#cc4000" },
-                                        "&:disabled": { backgroundColor: "#ffb899" },
+                                        "&:hover": { backgroundColor: "#1a6bbf" },
+                                        "&:disabled": { backgroundColor: "#a8cff8" },
                                         textTransform: "none",
                                         fontWeight: 600,
                                         height: 40,
@@ -243,8 +243,8 @@ export default function ForgotPasswordForm() {
                                     sx={{
                                         mt: 1,
                                         backgroundColor: PURE_ORANGE,
-                                        "&:hover": { backgroundColor: "#cc4000" },
-                                        "&:disabled": { backgroundColor: "#ffb899" },
+                                        "&:hover": { backgroundColor: "#1a6bbf" },
+                                        "&:disabled": { backgroundColor: "#a8cff8" },
                                         textTransform: "none",
                                         fontWeight: 600,
                                         height: 40,
@@ -297,7 +297,7 @@ export default function ForgotPasswordForm() {
                                 fullWidth
                                 sx={{
                                     backgroundColor: PURE_ORANGE,
-                                    "&:hover": { backgroundColor: "#cc4000" },
+                                    "&:hover": { backgroundColor: "#1a6bbf" },
                                     textTransform: "none",
                                     fontWeight: 600,
                                     height: 40,

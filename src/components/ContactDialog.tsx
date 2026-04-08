@@ -15,8 +15,9 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 import SendIcon from "@mui/icons-material/Send";
 import { APP_CONFIG } from "../config/appConfig";
+import { userPool } from "../config/cognito";
 
-const PURE_ORANGE = "#fe5000";
+const PURE_ORANGE = "#2D89EF";
 
 interface ContactDialogProps {
   open: boolean;
@@ -49,13 +50,28 @@ export default function ContactDialog({
     setSending(false);
   };
 
+  const getIdToken = (): Promise<string | null> =>
+    new Promise((resolve) => {
+      const user = userPool?.getCurrentUser();
+      if (!user) { resolve(null); return; }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      user.getSession((err: Error | null, session: any) => {
+        if (err || !session?.isValid()) { resolve(null); return; }
+        resolve(session.getIdToken().getJwtToken());
+      });
+    });
+
   const handleSend = async () => {
     setSending(true);
     setResult(null);
     try {
+      const token = await getIdToken();
       const response = await fetch("/api/contact", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           from: fromEmail,
           subject: subjectLine,
@@ -204,7 +220,7 @@ export default function ContactDialog({
           startIcon={sending ? <CircularProgress size={16} /> : <SendIcon />}
           sx={{
             backgroundColor: PURE_ORANGE,
-            "&:hover": { backgroundColor: "#cc4000" },
+            "&:hover": { backgroundColor: "#1a6bbf" },
             "&.Mui-disabled": { backgroundColor: "#ccc" },
           }}
         >

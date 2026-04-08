@@ -2,18 +2,22 @@ import { createHmac, createHash, timingSafeEqual } from "crypto";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { CognitoJwtVerifier } from "aws-jwt-verify";
 
 const s3 = new S3Client({ region: process.env.S3_REGION });
 const secretsManager = new SecretsManagerClient({ region: process.env.S3_REGION || process.env.AWS_REGION });
-const ses = new SESClient({ region: process.env.SES_REGION || process.env.AWS_REGION });
+const sts = new STSClient({ region: "us-west-2" });
+const SES_CROSS_ACCOUNT_ROLE = process.env.SES_CROSS_ACCOUNT_ROLE_ARN;
 const BUCKET = process.env.BUCKET_NAME;
 const DIST_PREFIX = process.env.DIST_PREFIX;
 const LOG_PREFIX = process.env.LOG_PREFIX || "logs";
-const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "aiuc@purestorage.com";
+const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "aiuc@spearhead.com";
 const APPROVAL_EMAIL = process.env.APPROVAL_EMAIL || CONTACT_EMAIL;
 const APP_URL = (process.env.APP_URL || "").replace(/\/$/, "");
-const APPROVAL_SECRET = process.env.APPROVAL_SECRET || "change-me-in-production";
+const APPROVAL_SECRET = process.env.APPROVAL_SECRET;
+
+if (!APPROVAL_SECRET) throw new Error("APPROVAL_SECRET env var is required");
 
 // Personal email domains that are blocked from registration
 const BLOCKED_DOMAINS = new Set([
@@ -80,7 +84,23 @@ function stripRestrictedColumns(rows, restrictedNames, columnKeyMap) {
     });
 }
 
+async function getSESClient() {
+    const assumed = await sts.send(new AssumeRoleCommand({
+        RoleArn: SES_CROSS_ACCOUNT_ROLE,
+        RoleSessionName: "aiuc-ses-send",
+    }));
+    return new SESClient({
+        region: "us-west-2",
+        credentials: {
+            accessKeyId: assumed.Credentials.AccessKeyId,
+            secretAccessKey: assumed.Credentials.SecretAccessKey,
+            sessionToken: assumed.Credentials.SessionToken,
+        },
+    });
+}
+
 async function sendEmail({ to, subject, text, replyTo }) {
+    const ses = await getSESClient();
     const params = {
         Source: SES_FROM,
         Destination: { ToAddresses: [to] },
@@ -288,7 +308,7 @@ export async function handler(event) {
 
             const command = new GetSecretValueCommand({ SecretId: secretName });
             const response = await secretsManager.send(command);
-            
+
             let secretData = {};
             if ("SecretString" in response) {
                 secretData = JSON.parse(response.SecretString);
@@ -322,6 +342,15 @@ export async function handler(event) {
     // --- Contact API route ---
     if ((path === "/api/contact" || path === "/api/contact/") && method === "POST") {
         try {
+            const authenticated = await isRequestAuthenticated(event);
+            if (!authenticated) {
+                return {
+                    statusCode: 401,
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ error: "You must be signed in to send a message." }),
+                };
+            }
+
             const body = JSON.parse(event.body || "{}");
             const { from, subject, message } = body;
 
@@ -579,9 +608,9 @@ export async function handler(event) {
                 timestamp: ts,
                 eventType,
                 userEmail: userEmail || "anonymous",
-                userName:  userName  || "anonymous",
+                userName: userName || "anonymous",
                 sessionId: sessionId || "unknown",
-                data:      data || {},
+                data: data || {},
             };
 
             await s3.send(new PutObjectCommand({
