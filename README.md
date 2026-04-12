@@ -4,14 +4,17 @@
 
 <h1 align="center">AI Use Case Repository (AIUC)</h1>
 
-An internal, employee-only React dashboard for browsing AI use cases and industry-specific AI implementation records. Protected by Okta authentication and served via AWS Lambda + S3.
+An internal, employee-only React dashboard for browsing AI use cases and industry-specific AI implementation records. Protected by Okta OIDC authentication and served via AWS Lambda + S3. Features semantic AI search powered by Amazon Bedrock embeddings and vector similarity, with AI-generated explanations for every result.
 
 ## Key Features
 
-- Secure Okta OIDC login (PKCE flow) — no unauthenticated access
-- Use Case table and Industry data table with filtering, sorting, and virtual scrolling
-- Contact form that sends branded HTML emails via Gmail API
-- Fully serverless — AWS Lambda serves both the React app and the API
+- **Secure Okta OIDC login** (PKCE flow) — no unauthenticated access
+- **Use Case table** and **Industry data table** with multi-column filtering, sorting, and virtual scrolling
+- **AI-powered semantic search** — query in plain English; Amazon Bedrock Titan embeds your query, finds the closest matches across 1 024-dimension vectors, and Bedrock Nova Lite explains why each result matched
+- **Industry AI search** — same RAG pipeline applied to industry-specific records
+- **Keyword fallback search** — automatic degradation when Bedrock is unavailable
+- **Contact button** — opens a Gmail compose tab directly in the browser
+- **Fully serverless** — one AWS Lambda function serves the React app, all API routes, and the vector search pipeline
 
 ---
 
@@ -22,13 +25,14 @@ An internal, employee-only React dashboard for browsing AI use cases and industr
 3. [Local Development](#local-development)
 4. [Environment Variables](#environment-variables)
 5. [Architecture Overview](#architecture-overview)
-6. [API Endpoints](#api-endpoints)
-7. [Gmail API Setup](#gmail-api-setup) — Google Cloud setup, token generation, email template, Lambda config, credential rotation
-8. [AWS Lambda Deployment](#aws-lambda-deployment)
-9. [GitHub Actions CI/CD](#github-actions-cicd)
-10. [Available Scripts](#available-scripts)
-11. [Directory Structure](#directory-structure)
-12. [Troubleshooting](#troubleshooting)
+6. [AI / RAG Search — How It Works](#ai--rag-search--how-it-works)
+7. [Generating Embeddings](#generating-embeddings)
+8. [API Endpoints](#api-endpoints)
+9. [AWS Lambda Deployment](#aws-lambda-deployment)
+10. [GitHub Actions CI/CD](#github-actions-cicd)
+11. [Available Scripts](#available-scripts)
+12. [Directory Structure](#directory-structure)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -42,9 +46,11 @@ An internal, employee-only React dashboard for browsing AI use cases and industr
 | **Tables** | TanStack React Table + React Virtual |
 | **Auth** | Okta OIDC (`@okta/okta-react`, `@okta/okta-auth-js`) |
 | **Backend** | AWS Lambda (Node.js 20, ESM) |
-| **Storage** | AWS S3 (static assets + JSON data files) |
+| **Storage** | AWS S3 (static assets + JSON data + pre-computed embeddings) |
 | **Secrets** | AWS Secrets Manager (Okta Client ID) |
-| **Email** | Google Gmail API v1 (OAuth2 refresh token) |
+| **Embeddings Model** | Amazon Bedrock — Titan Text Embeddings v2 (`amazon.titan-embed-text-v2:0`, 1 024-dim) |
+| **Explanation Model** | Amazon Bedrock — Nova Lite (`amazon.nova-lite-v1:0`) |
+| **Vector Index** | Custom in-memory FlatIP index (cosine similarity on L2-normalised vectors) |
 | **JWT Verification** | `jose` library |
 | **Build Tool** | Vite (frontend), plain Node.js (Lambda) |
 | **CI/CD** | GitHub Actions |
@@ -57,10 +63,9 @@ Install these before starting:
 
 - **Node.js 20+** — [https://nodejs.org](https://nodejs.org)
 - **npm 10+** — comes with Node.js
-- **AWS CLI** (for Lambda deployment) — [install guide](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
+- **AWS CLI** configured with credentials that have access to Lambda, S3, Secrets Manager, and Bedrock — [install guide](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
 - **Okta developer account** (or org account) — for authentication
-- **Google Cloud project** with Gmail API enabled — for contact form emails
-- **AWS account** with Lambda, S3, and Secrets Manager access
+- **AWS account** with Amazon Bedrock access enabled in your region (needed for embedding generation and live search)
 
 ---
 
@@ -71,7 +76,7 @@ Local dev uses a **two-server setup**:
 | Server | Command | Port | Purpose |
 |--------|---------|------|---------|
 | Vite dev server | `npm run dev` | `5173` | Serves frontend with hot reload |
-| Local API server | `npm run dev:server` | `3001` | Mirrors Lambda API routes |
+| Local API server | `npm run dev:server` | `3001` | Mirrors all Lambda API routes including search |
 
 Vite proxies all `/api/*` requests to the local API server on port 3001.
 
@@ -93,19 +98,21 @@ Create a `.env.local` file in the project root (this file is gitignored):
 VITE_OKTA_ISSUER=https://YOUR_OKTA_DOMAIN/oauth2/default
 VITE_OKTA_CLIENT_ID=YOUR_OKTA_CLIENT_ID
 
-# ── Gmail API ─────────────────────────────────────────────────────────────────
-GMAIL_CLIENT_ID=your_google_oauth_client_id
-GMAIL_CLIENT_SECRET=your_google_oauth_client_secret
-GMAIL_REFRESH_TOKEN=your_refresh_token
-GMAIL_SENDER=your_gmail_address@gmail.com
-CONTACT_EMAIL=destination_email@example.com
+# ── AWS / Bedrock ─────────────────────────────────────────────────────────────
+AWS_REGION=us-east-2
+# AWS credentials are picked up automatically from ~/.aws/credentials or env vars:
+# AWS_ACCESS_KEY_ID=...
+# AWS_SECRET_ACCESS_KEY=...
+
+# ── AI Search feature flag ────────────────────────────────────────────────────
+ENABLE_AI_SEARCH=true        # set to false to force keyword-only search
 
 # ── API proxy target ──────────────────────────────────────────────────────────
 VITE_API_BASE_URL=http://localhost:3001
 ```
 
-> See [Gmail API Setup](#gmail-api-setup) to get your Gmail credentials.
-> Your `VITE_OKTA_ISSUER` and `VITE_OKTA_CLIENT_ID` come from your Okta app settings.
+> `VITE_OKTA_ISSUER` and `VITE_OKTA_CLIENT_ID` come from your Okta app settings.
+> AWS credentials for Bedrock are read from your local AWS config — no hard-coded keys needed.
 
 ### Step 3 — Add `localhost` as Okta Redirect URI
 
@@ -122,9 +129,9 @@ In your Okta Admin Console:
    ```
 4. Save changes.
 
-### Step 4 — (Optional) Add Local JSON Data Files
+### Step 4 — Add Local JSON Data Files
 
-The data tables load from `/api/data/use-cases` and `/api/data/industry`. In local dev, these read from local JSON files if they exist:
+The data tables load from `/api/data/use-cases` and `/api/data/industry`. In local dev, the API server reads from local JSON files:
 
 ```
 local-data/
@@ -132,7 +139,17 @@ local-data/
 └── industry_use_cases.json
 ```
 
-Create the `local-data/` folder in the project root and place your data files there. If files don't exist the tables render empty — the app still works for testing the contact form and auth flow.
+Create the `local-data/` folder in the project root and place your JSON data files there. If files are missing the tables render empty — auth and search flows still work.
+
+The search endpoints also require the pre-computed embeddings files. Copy them into `local-data/` as well (or generate them — see [Generating Embeddings](#generating-embeddings)):
+
+```
+local-data/
+├── use_cases.json
+├── industry_use_cases.json
+├── use_cases_embeddings.json           ← required for AI search
+└── industry_use_cases_embeddings.json  ← required for industry AI search
+```
 
 ### Step 5 — Start Both Servers
 
@@ -148,8 +165,7 @@ Expected output:
 ✓ Local API server running at http://localhost:3001
   Okta issuer  : https://trial-xxx.okta.com/oauth2/default
   Okta clientId: 0oa...
-  Gmail sender : you@gmail.com
-  Contact email: destination@example.com
+  AI search    : enabled
 
 Ready — waiting for Vite proxy requests...
 ```
@@ -168,20 +184,20 @@ Expected output:
 
 ### Step 6 — Open in Browser
 
-Go to **http://localhost:5173** — you will be redirected to Okta to sign in, then land on the dashboard.
+Go to **http://localhost:5173** — you will be redirected to Okta to sign in, then land on the dashboard. Use the **AI Search** toggle in either table to try semantic search.
 
 ---
 
 ## Environment Variables
 
-### Frontend (build-time, in `.env` or `.env.local`)
+### Frontend (build-time, in `.env.local`)
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `VITE_OKTA_ISSUER` | Local dev only | — | Okta issuer URL (e.g. `https://company.okta.com/oauth2/default`) |
 | `VITE_OKTA_CLIENT_ID` | Local dev only | — | Okta app Client ID |
 | `VITE_API_BASE_URL` | Local dev only | — | API server URL for Vite proxy — set to `http://localhost:3001` |
-| `VITE_CONTACT_EMAIL` | No | `aiuc@purestorage.com` | Contact email shown in the UI footer |
+| `VITE_CONTACT_EMAIL` | No | `aiuc@purestorage.com` | Contact email shown in the UI |
 | `VITE_EMAIL_TOOLTIP_TEXT` | No | `I'm interested — contact me` | Tooltip on the email icon |
 | `VITE_BASE_PATH` | No | `/` | Base URL path — only set for sub-path deployments (e.g. `/app/aiuc`) |
 
@@ -197,11 +213,8 @@ Go to **http://localhost:5173** — you will be redirected to Okta to sign in, t
 | `OKTA_ISSUER` | Yes | — | Okta issuer URL |
 | `OKTA_AUDIENCE` | No | `api://default` | Expected JWT audience |
 | `AIUC_SECRET_NAME` | Yes | — | Secrets Manager secret name (e.g. `aiuc/okta`) |
-| `CONTACT_EMAIL` | No | `aiuc@purestorage.com` | Destination address for contact emails |
-| `GMAIL_CLIENT_ID` | Yes (email) | — | Google OAuth2 Client ID |
-| `GMAIL_CLIENT_SECRET` | Yes (email) | — | Google OAuth2 Client Secret |
-| `GMAIL_REFRESH_TOKEN` | Yes (email) | — | Long-lived OAuth2 refresh token |
-| `GMAIL_SENDER` | Yes (email) | — | Gmail address used to send emails |
+| `ENABLE_AI_SEARCH` | No | `true` | Set to `false` to disable Bedrock and use keyword-only search |
+| `CONTACT_EMAIL` | No | `aiuc@purestorage.com` | Destination address shown in contact button |
 | `BASE_PATH` | No | — | Sub-path prefix (e.g. `/app/aiuc`) — sub-path deployments only |
 
 ### AWS Secrets Manager Secret (`aiuc/okta`)
@@ -221,17 +234,20 @@ Create this secret with the following JSON value:
 ```
 Browser
   │
-  ├── Local Dev ────────────────────────────────────────────────────────────
+  ├── Local Dev ──────────────────────────────────────────────────────────────
   │     Vite (port 5173) ──proxy /api/*──► local-server.mjs (port 3001)
   │                                           reads .env.local
+  │                                           calls Bedrock for search
   │
-  └── Production ───────────────────────────────────────────────────────────
+  └── Production ─────────────────────────────────────────────────────────────
         Lambda Function URL
-          ├── GET  /                  → Serves dist/index.html from S3
-          ├── GET  /assets/*          → Serves static assets from S3
-          ├── GET  /api/okta-config   → Secrets Manager → { issuer, clientId }
-          ├── GET  /api/data/*        → Verify JWT → S3 JSON files
-          └── POST /api/contact       → Verify JWT → Gmail API → send email
+          ├── GET  /                        → Serves dist/index.html from S3
+          ├── GET  /assets/*                → Serves static assets from S3
+          ├── GET  /api/okta-config         → Secrets Manager → { issuer, clientId }
+          ├── GET  /api/data/use-cases      → Verify JWT → S3 use_cases.json
+          ├── GET  /api/data/industry       → Verify JWT → S3 industry_use_cases.json
+          ├── POST /api/search              → Verify JWT → Bedrock embed → vector search → Nova Lite
+          └── POST /api/search/industry     → Verify JWT → Bedrock embed → vector search → Nova Lite
 ```
 
 ### Okta Authentication Flow
@@ -251,13 +267,144 @@ Browser
 
 ```
 s3://your-bucket/
-├── dist/                       ← Built React app (uploaded by CI/CD)
+├── dist/                                   ← Built React app (uploaded by CI/CD)
 │   ├── index.html
 │   └── assets/
 │       ├── index-[hash].js
 │       └── index-[hash].css
-├── use_cases.json              ← Use case data (upload manually)
-└── industry_use_cases.json     ← Industry data (upload manually)
+├── use_cases.json                          ← Use case data (upload manually)
+├── industry_use_cases.json                 ← Industry data (upload manually)
+├── use_cases_embeddings.json               ← Pre-computed vectors (upload after generation)
+└── industry_use_cases_embeddings.json      ← Pre-computed vectors (upload after generation)
+```
+
+---
+
+## AI / RAG Search — How It Works
+
+AIUC implements a **Retrieval-Augmented Generation (RAG)** pipeline for both the Use Case and Industry tables. Here is the complete end-to-end flow:
+
+### 1. Offline: Embedding Generation
+
+Before the search feature can work, each record in `use_cases.json` and `industry_use_cases.json` must be converted into a numeric vector using Amazon Bedrock Titan Text Embeddings v2.
+
+This is a **one-time offline step** that you run locally whenever the data changes. The scripts concatenate the most informative fields of each record into a single text string, call the Bedrock embedding API, and write the resulting 1 024-dimension vectors alongside the original records to a new JSON file.
+
+See [Generating Embeddings](#generating-embeddings) for the exact commands.
+
+### 2. Storage
+
+The generated embedding files are stored in S3 alongside the raw data JSON. The Lambda loads them once per cold start and keeps them in memory for the lifetime of the execution environment — so there is no per-request S3 read overhead after the first call.
+
+### 3. Query Time: Vector Search
+
+When a user types a query and clicks **Search** with the AI Search toggle on:
+
+```
+User query
+    │
+    ▼ POST /api/search  (Bearer token)
+    │
+    ▼ Lambda
+    ├── Verify Okta JWT
+    ├── Load embeddings from S3 (cached in memory)
+    ├── Call Bedrock Titan to embed the query → 1 024-dim vector
+    ├── Compute cosine similarity against every stored vector (FlatIP index)
+    ├── Return top-K results (default 10, max 15) with similarity score
+    └── For each result, call Bedrock Nova Lite:
+            "In one sentence, why does this record match the query?"
+    │
+    ▼ JSON response
+    [
+      { "useCase": { ...fields }, "score": 0.87, "whyMatched": "This record focuses on..." },
+      ...
+    ]
+    │
+    ▼ Frontend hook (useAISearch / useIndustrySearch)
+    └── Renders results with score badge + "Why Matched" column
+```
+
+### 4. Fallback: Keyword Search
+
+If Bedrock is unavailable (throttled, network error) or `ENABLE_AI_SEARCH=false`, the search endpoint automatically falls back to a **keyword search**: it splits the query into terms, counts how many fields each record matches, and returns results sorted by match count. The Nova Lite explanations are still generated for keyword results.
+
+### 5. Frontend UI
+
+In `UseCaseTable` and `IndustryDataTable` there is an **AI Search** toggle button (state persisted to `localStorage`).
+
+- **Toggle off** — standard multi-column filter view
+- **Toggle on** — shows a text input and **Search** button; results appear in a scored list with a **Why Matched** column
+
+---
+
+## Generating Embeddings
+
+Run these scripts whenever your source data changes. You need AWS credentials with Bedrock access in the region where Titan is available.
+
+### Use Case Embeddings
+
+```bash
+# From the project root
+node lambda/generate-embeddings-local.mjs
+```
+
+- **Reads**: `public/data/use_cases.json`
+- **Writes**: `public/data/use_cases_embeddings.json`
+- **Fields embedded**: `ai_use_case`, `business_function`, `business_capability`, `action_implementation`, `expected_outcomes`, `stakeholder`, `ai_tools_models`, `datasets`
+- **Model**: `amazon.titan-embed-text-v2:0` (1 024 dimensions, L2-normalised)
+- Includes automatic retry with exponential backoff for Bedrock throttling
+
+Expected output:
+```
+Generating embeddings for 250 use cases...
+[1/250] Embedded: "Predictive maintenance for storage arrays"
+[2/250] Embedded: "Automated capacity planning"
+...
+✓ Done. Written to public/data/use_cases_embeddings.json
+```
+
+### Industry Use Case Embeddings
+
+```bash
+node lambda/generate-embeddings-industry-local.mjs
+```
+
+- **Reads**: `public/data/industry_use_cases.json`
+- **Writes**: `public/data/industry_use_cases_embeddings.json`
+- **Fields embedded**: `ai_use_case`, `industry`, `business_function`, `business_capability`, `description`, `implementation_plan`, `expected_outcomes`, `stakeholders`, `ai_tools_platforms`, `datasets`
+
+### Upload Embeddings to S3
+
+After generating, upload both files to your S3 bucket so Lambda can load them:
+
+```bash
+aws s3 cp public/data/use_cases_embeddings.json \
+    s3://YOUR_BUCKET_NAME/use_cases_embeddings.json \
+    --region YOUR_REGION
+
+aws s3 cp public/data/industry_use_cases_embeddings.json \
+    s3://YOUR_BUCKET_NAME/industry_use_cases_embeddings.json \
+    --region YOUR_REGION
+```
+
+> The embedding files are large (~10–15 MB each). Do **not** commit them to git — they are listed in `.gitignore`. Always regenerate from source and upload directly to S3.
+
+### Embeddings File Format
+
+Each file is a JSON array. Every element contains the original record and its 1 024-dimension vector:
+
+```json
+[
+  {
+    "useCase": {
+      "id": 1,
+      "ai_use_case": "Predictive maintenance for storage arrays",
+      ...
+    },
+    "embedding": [0.0231, -0.0184, 0.0412, ...]
+  },
+  ...
+]
 ```
 
 ---
@@ -269,292 +416,71 @@ s3://your-bucket/
 | `GET` | `/api/okta-config` | No | Returns Okta `issuer` and `clientId` |
 | `GET` | `/api/data/use-cases` | JWT | Returns use case JSON array from S3 |
 | `GET` | `/api/data/industry` | JWT | Returns industry data JSON array from S3 |
-| `POST` | `/api/contact` | JWT | Sends contact email via Gmail API |
+| `POST` | `/api/search` | JWT | AI vector search over use cases |
+| `POST` | `/api/search/industry` | JWT | AI vector search over industry records |
 | `GET` | `/*` | No | Serves static files from S3 `dist/` |
 
-### `POST /api/contact` — Request Body
+### `POST /api/search` — Request Body
 
 ```json
 {
-  "from": "user@example.com",
-  "subject": "Interest in: AI Use Case Name",
-  "message": "Hello, I am interested in this use case..."
+  "query": "machine learning for storage capacity forecasting"
 }
 ```
 
-### `POST /api/contact` — Success Response
+### `POST /api/search` — Success Response
 
 ```json
-{ "success": true, "message": "Email sent successfully" }
+[
+  {
+    "useCase": {
+      "id": 42,
+      "Business Function": "IT Operations",
+      "AI Use Case": "Predictive Capacity Planning",
+      "Expected Outcomes and Results": "Reduce over-provisioning by 30%",
+      "..."
+    },
+    "score": 0.891,
+    "whyMatched": "This use case applies ML to forecast storage capacity needs, directly matching the query about capacity forecasting."
+  },
+  ...
+]
 ```
 
----
+### `POST /api/search/industry` — Request Body
 
-## Gmail API Setup
-
-The contact form sends branded HTML emails via **Gmail API (OAuth2)** — not SMTP. This means no SMTP server is needed; the Lambda authenticates as your Gmail account using a long-lived refresh token and calls the Gmail API directly.
-
-### How It Works
-
-```
-User submits contact form
-        │
-        ▼
-POST /api/contact  (with Okta Bearer token)
-        │
-        ▼
-Lambda (index.mjs)
-  ├── Verifies Okta JWT
-  ├── Validates email format + sanitizes headers
-  ├── Builds HTML email  ← lambda/emailTemplate.mjs
-  ├── Creates Gmail OAuth2 client from GMAIL_* env vars
-  ├── Refreshes access token automatically (no user interaction)
-  └── Calls gmail.users.messages.send()
-        │
-        ▼
-Email delivered to CONTACT_EMAIL inbox
-  From:     GMAIL_SENDER
-  Reply-To: user's email address
-  Subject:  as submitted
-  Body:     branded HTML template (Pure Storage orange #FA4616)
-```
-
-### The Email Template (`lambda/emailTemplate.mjs`)
-
-All emails use a branded HTML template with:
-
-- Pure Storage orange (`#FA4616`) header bar
-- Sender email, subject line, and message body displayed clearly
-- All user input HTML-escaped (prevents injection)
-- Inline CSS for maximum email client compatibility (Gmail, Outlook, Apple Mail)
-- Footer with destination address
-
-To preview the template locally before deploying:
-
-```cmd
-cd lambda
-node test-template-local.mjs
-```
-
-This writes `lambda/test-email-output.html` — open it in your browser to see exactly how the email will look.
-
----
-
-### Step 1 — Create a Google Cloud Project
-
-1. Go to [https://console.cloud.google.com](https://console.cloud.google.com)
-2. Sign in with the Gmail account that will **send** the emails (e.g. `aiuc@yourcompany.com`)
-3. Click the project dropdown at the top → **New Project**
-   - Project name: `aiuc-email`
-   - Click **Create**
-4. Make sure the new project is selected in the dropdown
-
----
-
-### Step 2 — Enable the Gmail API
-
-1. Go to **APIs & Services → Library**
-2. Search for `Gmail API` → click it → click **Enable**
-
----
-
-### Step 3 — Configure the OAuth Consent Screen
-
-1. Go to **APIs & Services → OAuth consent screen**
-2. User type: **External** → **Create**
-3. Fill in:
-   - App name: `AIUC Contact Form`
-   - User support email: your email
-   - Developer contact email: your email
-4. Click **Save and Continue** through Scopes (no changes needed)
-5. On the **Test users** screen:
-   - Click **+ Add Users**
-   - Add the Gmail address that will send emails
-   - Click **Save**
-6. Click **Back to Dashboard**
-
-> The app stays in Testing mode permanently — it only needs to work for the one Gmail account, never for external users.
-
----
-
-### Step 4 — Create OAuth2 Credentials
-
-1. Go to **APIs & Services → Credentials**
-2. Click **+ Create Credentials → OAuth 2.0 Client ID**
-3. Application type: **Desktop app**
-4. Name: `aiuc-lambda-mailer`
-5. Click **Create**
-6. In the popup — click **Download JSON** (or copy the values directly):
-   - `client_id` (looks like `186826723477-xxx.apps.googleusercontent.com`)
-   - `client_secret` (looks like `GOCSPX-xxx`)
-
----
-
-### Step 5 — Generate the Refresh Token (one-time per environment)
-
-The refresh token allows the Lambda to send emails indefinitely without user interaction.
-
-**Create the token generation script:**
-
-```cmd
-cd lambda
-```
-
-Create `get-gmail-token.mjs` with:
-
-```js
-import { createInterface } from "readline";
-import { google } from "googleapis";
-
-const CLIENT_ID     = "PASTE_YOUR_CLIENT_ID_HERE";
-const CLIENT_SECRET = "PASTE_YOUR_CLIENT_SECRET_HERE";
-const REDIRECT_URI  = "urn:ietf:wg:oauth:2.0:oob";
-
-const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
-
-const authUrl = oauth2Client.generateAuthUrl({
-  access_type: "offline",
-  scope: ["https://www.googleapis.com/auth/gmail.send"],
-  prompt: "consent",
-});
-
-console.log("\n=== Open this URL in your browser ===\n");
-console.log(authUrl);
-console.log("\n=====================================\n");
-
-const rl = createInterface({ input: process.stdin, output: process.stdout });
-rl.question("Paste the authorization code: ", async (code) => {
-  rl.close();
-  const { tokens } = await oauth2Client.getToken(code.trim());
-  console.log("\n=== Save these to Lambda environment variables ===\n");
-  console.log(`GMAIL_CLIENT_ID     = ${CLIENT_ID}`);
-  console.log(`GMAIL_CLIENT_SECRET = ${CLIENT_SECRET}`);
-  console.log(`GMAIL_REFRESH_TOKEN = ${tokens.refresh_token}`);
-  console.log("\n==================================================\n");
-  console.log("DELETE this file now: lambda/get-gmail-token.mjs");
-});
-```
-
-**Run it:**
-
-```cmd
-node get-gmail-token.mjs
-```
-
-**Follow the prompts:**
-
-1. The script prints a long URL — open it in your browser
-2. Sign in with the Gmail account that will send emails
-3. Click **Allow** on the Google authorization page
-4. Google shows a code — copy it
-5. Paste the code into the terminal prompt and press Enter
-6. The script prints your 3 credential values — copy them
-
-**Output looks like:**
-```
-GMAIL_CLIENT_ID     = 186826723477-xxx.apps.googleusercontent.com
-GMAIL_CLIENT_SECRET = GOCSPX-xxx
-GMAIL_REFRESH_TOKEN = 1//0gXXX...
-```
-
-> **Immediately delete** `get-gmail-token.mjs` after copying the token — it contains your credentials:
-> ```cmd
-> del lambda\get-gmail-token.mjs
-> ```
-
----
-
-### Step 6 — Store the Credentials
-
-#### For Local Development — `.env.local`
-
-Add to `.env.local` in the project root:
-
-```env
-GMAIL_CLIENT_ID=186826723477-xxx.apps.googleusercontent.com
-GMAIL_CLIENT_SECRET=GOCSPX-xxx
-GMAIL_REFRESH_TOKEN=1//0gXXX...
-GMAIL_SENDER=your_gmail@gmail.com
-CONTACT_EMAIL=destination@example.com
-```
-
-#### For AWS Lambda — Environment Variables
-
-In **AWS Console → Lambda → Your Function → Configuration → Environment Variables → Edit**, add:
-
-| Key | Value |
-|-----|-------|
-| `GMAIL_CLIENT_ID` | from Google Cloud Console |
-| `GMAIL_CLIENT_SECRET` | from Google Cloud Console |
-| `GMAIL_REFRESH_TOKEN` | from token script output |
-| `GMAIL_SENDER` | Gmail address you authorized (e.g. `aiuc@yourcompany.com`) |
-| `CONTACT_EMAIL` | where contact emails are delivered |
-
-Click **Save**. The Lambda picks up the new env vars immediately — no redeploy needed.
-
----
-
-### Step 7 — Test the Email Locally
-
-Before deploying to Lambda, verify everything works:
-
-```cmd
-cd lambda
-set GMAIL_CLIENT_ID=your_client_id
-set GMAIL_CLIENT_SECRET=your_client_secret
-set GMAIL_REFRESH_TOKEN=your_refresh_token
-set GMAIL_SENDER=your_gmail@gmail.com
-set CONTACT_EMAIL=your_gmail@gmail.com
-node test-gmail-send-local.mjs
-```
-
-Expected output:
-```
-Sending test email from your_gmail@gmail.com to your_gmail@gmail.com ...
-✓ Email sent successfully!
-  Gmail message ID: 18xxxxxxxxxxxxxxx
-  Check inbox at: your_gmail@gmail.com
-```
-
-Check your inbox — you should receive the branded HTML email.
-
----
-
-### Step 8 — Test on AWS Lambda
-
-After setting env vars in Lambda console, test via the contact form in the deployed app, or use `curl`:
-
-```cmd
-curl -X POST https://YOUR_LAMBDA_FUNCTION_URL/api/contact ^
-  -H "Content-Type: application/json" ^
-  -H "Authorization: Bearer YOUR_OKTA_ACCESS_TOKEN" ^
-  -d "{\"from\":\"test@example.com\",\"subject\":\"Test\",\"message\":\"Hello from Lambda\"}"
-```
-
-Expected response:
 ```json
-{"success": true, "message": "Email sent successfully"}
+{
+  "query": "AI fraud detection in financial services"
+}
 ```
 
----
-
-### Rotating Credentials
-
-Gmail credentials should be rotated if exposed. To rotate:
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services → Credentials**
-2. Click the pencil on `aiuc-lambda-mailer` → **Reset Secret** → copy the new secret
-3. Go to [https://myaccount.google.com/permissions](https://myaccount.google.com/permissions) → find the app → **Remove Access** (revokes old refresh token)
-4. Re-run `get-gmail-token.mjs` with the new secret to get a new refresh token
-5. Update `GMAIL_CLIENT_SECRET` and `GMAIL_REFRESH_TOKEN` in:
-   - `.env.local` (local dev)
-   - AWS Lambda environment variables (production)
+Response shape is the same as `/api/search` but the `useCase` field contains industry record fields (`Industry`, `Description`, `Implementation Plan`, etc.).
 
 ---
 
 ## AWS Lambda Deployment
 
 > For first-time infrastructure setup (Lambda function creation, S3 bucket policy, IAM role, Secrets Manager, Function URL), see **[DEPLOYMENT_CONFIG.md](./DEPLOYMENT_CONFIG.md)**.
+
+### IAM Permissions Required for AI Search
+
+The Lambda execution role needs the following additional permissions for Bedrock:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "bedrock:InvokeModel"
+  ],
+  "Resource": [
+    "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
+    "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0"
+  ]
+}
+```
+
+Add this to your Lambda execution role in **IAM → Roles → Your Role → Add permissions → Create inline policy**.
 
 ### 1 — Build the Frontend
 
@@ -579,11 +505,18 @@ aws s3 sync dist/ s3://YOUR_BUCKET_NAME/dist/ --delete --region YOUR_REGION
 ### 3 — Upload Data Files (first time or when data changes)
 
 ```cmd
-aws s3 cp use_cases.json s3://YOUR_BUCKET_NAME/ --region YOUR_REGION
-aws s3 cp industry_use_cases.json s3://YOUR_BUCKET_NAME/ --region YOUR_REGION
+aws s3 cp public/data/use_cases.json s3://YOUR_BUCKET_NAME/ --region YOUR_REGION
+aws s3 cp public/data/industry_use_cases.json s3://YOUR_BUCKET_NAME/ --region YOUR_REGION
 ```
 
-### 4 — Package the Lambda Function
+### 4 — Upload Embeddings (after generating or when data changes)
+
+```cmd
+aws s3 cp public/data/use_cases_embeddings.json s3://YOUR_BUCKET_NAME/ --region YOUR_REGION
+aws s3 cp public/data/industry_use_cases_embeddings.json s3://YOUR_BUCKET_NAME/ --region YOUR_REGION
+```
+
+### 5 — Package the Lambda Function
 
 ```cmd
 cd lambda
@@ -600,7 +533,7 @@ Compress-Archive -Path lambda\* -DestinationPath lambda.zip -Force
 cd lambda && zip -r ../lambda.zip . && cd ..
 ```
 
-### 5 — Deploy Lambda Code
+### 6 — Deploy Lambda Code
 
 ```cmd
 aws lambda update-function-code ^
@@ -609,7 +542,7 @@ aws lambda update-function-code ^
   --region YOUR_REGION
 ```
 
-### 6 — Set Lambda Environment Variables
+### 7 — Set Lambda Environment Variables
 
 In **AWS Console → Lambda → Your Function → Configuration → Environment Variables → Edit**:
 
@@ -621,13 +554,9 @@ In **AWS Console → Lambda → Your Function → Configuration → Environment 
 | `OKTA_ISSUER` | `https://company.okta.com/oauth2/default` |
 | `OKTA_AUDIENCE` | `api://default` |
 | `AIUC_SECRET_NAME` | `aiuc/okta` |
-| `CONTACT_EMAIL` | `aiuc@purestorage.com` |
-| `GMAIL_CLIENT_ID` | from Google Cloud Console |
-| `GMAIL_CLIENT_SECRET` | from Google Cloud Console |
-| `GMAIL_REFRESH_TOKEN` | from token generation script |
-| `GMAIL_SENDER` | `sender@gmail.com` |
+| `ENABLE_AI_SEARCH` | `true` |
 
-### 7 — Register Lambda URL in Okta
+### 8 — Register Lambda URL in Okta
 
 In Okta Admin Console → **Applications → Your App → General**:
 
@@ -640,7 +569,7 @@ In Okta Admin Console → **Applications → Your App → General**:
   https://YOUR_LAMBDA_FUNCTION_URL/
   ```
 
-### 8 — Verify Deployment
+### 9 — Verify Deployment
 
 ```cmd
 curl https://YOUR_LAMBDA_FUNCTION_URL/api/okta-config
@@ -649,6 +578,15 @@ curl https://YOUR_LAMBDA_FUNCTION_URL/api/okta-config
 Expected response:
 ```json
 {"issuer":"https://company.okta.com/oauth2/default","clientId":"0oa..."}
+```
+
+Test the search endpoint (requires a valid Okta token):
+
+```cmd
+curl -X POST https://YOUR_LAMBDA_FUNCTION_URL/api/search ^
+  -H "Content-Type: application/json" ^
+  -H "Authorization: Bearer YOUR_OKTA_ACCESS_TOKEN" ^
+  -d "{\"query\":\"machine learning for storage\"}"
 ```
 
 ---
@@ -678,9 +616,13 @@ Go to **GitHub → Repo → Settings → Secrets and variables → Actions** and
 5. Packages `lambda/` as a zip
 6. Runs `aws lambda update-function-code`
 
+> Embedding files are **not** regenerated by CI/CD. Run the embedding scripts locally whenever your source data changes and upload the results to S3 manually (or add a separate manual workflow for it).
+
 ---
 
 ## Available Scripts
+
+### Frontend
 
 | Command | Description |
 |---------|-------------|
@@ -690,18 +632,18 @@ Go to **GitHub → Repo → Settings → Secrets and variables → Actions** and
 | `npm run preview` | Preview production build locally |
 | `npm run lint` | Run ESLint on `src/` |
 
-### Lambda Local Test Scripts
+### Embedding Generation
 
-```cmd
-cd lambda
+| Command | Description |
+|---------|-------------|
+| `npm run embeddings` | Generate `use_cases_embeddings.json` via Bedrock Titan |
+| `npm run embeddings:industry` | Generate `industry_use_cases_embeddings.json` via Bedrock Titan |
 
-# Preview the HTML email template in a browser
-node test-template-local.mjs
-# → writes lambda/test-email-output.html, open it in your browser
+Or run the scripts directly from the project root:
 
-# Send a real test email via Gmail API
-# Set GMAIL_* env vars first — see comments inside the file
-node test-gmail-send-local.mjs
+```bash
+node lambda/generate-embeddings-local.mjs
+node lambda/generate-embeddings-industry-local.mjs
 ```
 
 ---
@@ -712,47 +654,57 @@ node test-gmail-send-local.mjs
 aiuc/
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml              # GitHub Actions CI/CD
+│       └── deploy.yml                          # GitHub Actions CI/CD
 ├── docs/
-│   └── plans/                      # Implementation plan docs
+│   └── plans/                                  # Implementation plan docs
 ├── lambda/
-│   ├── index.mjs                   # Lambda handler (routes, auth, S3, email)
-│   ├── emailTemplate.mjs           # Branded HTML email builder
-│   ├── local-server.mjs            # Local dev API server (mirrors Lambda)
+│   ├── index.mjs                               # Lambda handler (routes, auth, S3, search)
+│   ├── local-server.mjs                        # Local dev API server (mirrors Lambda)
+│   ├── generate-embeddings-local.mjs           # Bedrock Titan embedding gen — use cases
+│   ├── generate-embeddings-industry-local.mjs  # Bedrock Titan embedding gen — industry
 │   ├── package.json
 │   └── package-lock.json
-├── local-data/                     # (gitignored) local JSON data files
+├── local-data/                                 # (gitignored) local JSON data files for dev
 │   ├── use_cases.json
-│   └── industry_use_cases.json
+│   ├── industry_use_cases.json
+│   ├── use_cases_embeddings.json
+│   └── industry_use_cases_embeddings.json
 ├── public/
-│   └── assets/
-│       ├── purelogo.png
-│       └── spearhead.png
+│   ├── assets/
+│   │   ├── purelogo.png
+│   │   └── spearhead.png
+│   └── data/                                   # Source data and generated embeddings
+│       ├── use_cases.json
+│       ├── industry_use_cases.json
+│       ├── use_cases_embeddings.json           # Generated — do not commit
+│       └── industry_use_cases_embeddings.json  # Generated — do not commit
 ├── src/
 │   ├── components/
-│   │   ├── ContactDialog.tsx        # Contact form modal
-│   │   ├── IndustryDataTable.tsx    # Industry data table with filters
-│   │   ├── UseCaseTable.tsx         # Use case data table with filters
+│   │   ├── ContactDialog.tsx                   # Contact button (opens Gmail compose)
+│   │   ├── IndustryDataTable.tsx               # Industry table with filters + AI search
+│   │   ├── UseCaseTable.tsx                    # Use case table with filters + AI search
 │   │   └── Logo.tsx
 │   ├── config/
-│   │   └── okta.ts                  # Okta SDK initialization
+│   │   └── okta.ts                             # Okta SDK initialization
 │   ├── hooks/
-│   │   ├── useOktaUser.ts           # Extract user info from Okta token
-│   │   └── useS3Data.ts             # Fetch + map data from API
-│   ├── App.tsx                      # Main dashboard (tabs, layout)
-│   ├── main.tsx                     # Entry point, Okta Security wrapper
-│   ├── theme.ts                     # MUI theme (Pure Storage branding)
-│   ├── types.ts                     # TypeScript interfaces
+│   │   ├── useAISearch.ts                      # Vector search hook — use cases
+│   │   ├── useIndustrySearch.ts                # Vector search hook — industry
+│   │   ├── useOktaUser.ts                      # Extract user info from Okta token
+│   │   └── useS3Data.ts                        # Fetch + map raw data from API
+│   ├── App.tsx                                 # Main dashboard (tabs, layout)
+│   ├── main.tsx                                # Entry point, Okta Security wrapper
+│   ├── theme.ts                                # MUI theme (Pure Storage branding)
+│   ├── types.ts                                # TypeScript interfaces
 │   ├── utils.ts
 │   └── globals.css
-├── .env.local                       # (gitignored) local env vars
+├── .env.local                                  # (gitignored) local env vars
 ├── .gitignore
 ├── index.html
 ├── vite.config.ts
 ├── tsconfig.json
 ├── package.json
 ├── README.md
-└── DEPLOYMENT_CONFIG.md             # Detailed AWS infrastructure setup guide
+└── DEPLOYMENT_CONFIG.md                        # Detailed AWS infrastructure setup guide
 ```
 
 ---
@@ -792,13 +744,51 @@ npm run dev:server
 
 **Cause:** App is in Testing mode and your account is not a test user.
 
-**Fix:** Okta Admin → **Applications → Your App → Assignments** → assign your user. Also add your email as a test user in the Google OAuth consent screen.
+**Fix:** Okta Admin → **Applications → Your App → Assignments** → assign your user.
 
 ---
 
-### `Cannot find package 'googleapis'`
+### AI Search returns no results / falls back to keyword search
 
-**Cause:** Running `node local-server.mjs` directly from the root. `googleapis` lives in `lambda/node_modules`.
+**Cause:** Bedrock is not reachable — missing credentials, wrong region, or model not enabled.
+
+**Fix:**
+1. Confirm your AWS credentials have Bedrock `InvokeModel` permission for Titan and Nova Lite
+2. Make sure Bedrock model access is **enabled** in the AWS Console: **Bedrock → Model access → Manage model access** → enable `amazon.titan-embed-text-v2:0` and `amazon.nova-lite-v1:0`
+3. Check that `AWS_REGION` in `.env.local` matches the region where you enabled models
+4. Run a direct Bedrock test:
+   ```bash
+   aws bedrock-runtime invoke-model \
+     --model-id amazon.titan-embed-text-v2:0 \
+     --body '{"inputText":"test"}' \
+     --cli-binary-format raw-in-base64-out \
+     output.json --region us-east-2
+   ```
+
+---
+
+### AI Search endpoint returns `500 — embeddings not loaded`
+
+**Cause:** The embedding JSON files are missing from S3 (or `local-data/` in dev).
+
+**Fix:**
+1. Run the embedding generation scripts (see [Generating Embeddings](#generating-embeddings))
+2. Upload the output files to S3
+3. In local dev, copy the files to `local-data/`
+
+---
+
+### Embedding generation script fails with throttling errors
+
+**Cause:** Bedrock Titan has per-minute request limits and you are hitting them.
+
+**Fix:** The scripts include automatic retry with exponential backoff — they will handle this automatically. If the failure is persistent, reduce the concurrency by adding a `--delay` flag (or wait a few minutes and re-run — the script is safe to restart; existing embeddings are overwritten).
+
+---
+
+### `Cannot find package 'googleapis'` or `@aws-sdk/*`
+
+**Cause:** Running `node local-server.mjs` directly from the root. Dependencies live in `lambda/node_modules`.
 
 **Fix:** Always use the npm script from the project root:
 ```cmd
@@ -807,49 +797,22 @@ npm run dev:server
 
 ---
 
-### Gmail `invalid_client` error
-
-**Cause:** `GMAIL_CLIENT_SECRET` is stale or was rotated.
-
-**Fix:**
-1. [Google Cloud Console](https://console.cloud.google.com/) → **Credentials** → edit `aiuc-lambda-mailer` → reset secret
-2. Update `GMAIL_CLIENT_SECRET` in `.env.local`
-3. Re-run `node lambda/get-gmail-token.mjs` to get a new refresh token
-
----
-
-### Contact form submits but no email received
-
-**Check in order:**
-1. Check your spam / junk folder
-2. Confirm `CONTACT_EMAIL` is set to your address
-3. Check Terminal 1 for `✓ Email sent — Gmail ID: xxx`
-4. Run the standalone send test:
-   ```cmd
-   cd lambda
-   set GMAIL_CLIENT_ID=...
-   set GMAIL_CLIENT_SECRET=...
-   set GMAIL_REFRESH_TOKEN=...
-   set GMAIL_SENDER=...
-   set CONTACT_EMAIL=your@email.com
-   node test-gmail-send-local.mjs
-   ```
-
----
-
-### Lambda returns 503 on `/api/contact`
-
-**Cause:** `GMAIL_*` environment variables not set in Lambda.
-
-**Fix:** AWS Console → Lambda → Configuration → Environment Variables → add all four `GMAIL_*` vars.
-
----
-
 ### Data tables show empty in local dev
 
 **Cause:** `local-data/use_cases.json` or `local-data/industry_use_cases.json` missing.
 
 **Fix:** Create `local-data/` in the project root and add your JSON files. See `src/hooks/useS3Data.ts` for the expected data shape (snake_case keys).
+
+---
+
+### Lambda search endpoint returns `403` or `401`
+
+**Cause:** The Okta JWT sent in `Authorization: Bearer` is expired or the Lambda's `OKTA_ISSUER` / `OKTA_AUDIENCE` doesn't match.
+
+**Fix:**
+1. Refresh your Okta session in the browser (log out and log back in)
+2. Verify `OKTA_ISSUER` in Lambda env vars matches `VITE_OKTA_ISSUER` used at build time
+3. Verify `OKTA_AUDIENCE` is `api://default` (or whatever your Okta authorization server uses)
 
 ---
 

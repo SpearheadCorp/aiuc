@@ -33,7 +33,8 @@ export const useS3Data = (): UseS3DataReturn => {
                 // const response = await fetch("/data/use_cases.json");
                 if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
                 const rawData = await response.json();
-                const mappedData = rawData.map((item: any) => ({
+                const useCaseItems: any[] = Array.isArray(rawData) ? rawData : (rawData.data ?? []);
+                const mappedData = useCaseItems.map((item: any) => ({
                     id: Number(item.capability),
                     Capability: Number(item.capability),
                     "Business Function": item.business_function,
@@ -70,7 +71,8 @@ export const useS3Data = (): UseS3DataReturn => {
                 });
                 if (!response.ok) throw new Error(`Failed to fetch industry data: ${response.status}`);
                 const rawData = await response.json();
-                const mappedData = rawData.map((item: any) => ({
+                const industryItems: any[] = Array.isArray(rawData) ? rawData : (rawData.data ?? []);
+                const mappedData = industryItems.map((item: any) => ({
                     Id: item.id,
                     Industry: item.industry,
                     "Business Function": item.business_function,

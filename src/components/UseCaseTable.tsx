@@ -37,6 +37,8 @@ import {
   Divider,
   Paper,
   Tooltip,
+  Switch,
+  FormControlLabel,
 } from "@mui/material";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import SearchIcon from "@mui/icons-material/Search";
@@ -44,9 +46,11 @@ import ClearIcon from "@mui/icons-material/Clear";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import MailOutlineIcon from "@mui/icons-material/MailOutline";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import type { UseCaseData } from "../types";
 import { parseChipItems } from "../utils";
-import ContactDialog from "./ContactDialog";
+import { openGmailCompose } from "./ContactDialog";
+import { useAISearch } from "../hooks/useAISearch";
 
 const PURE_ORANGE = "#fe5000";
 
@@ -78,9 +82,36 @@ export default function UseCaseTable({
   const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState("");
 
-  // Contact dialog state
-  const [contactDialogOpen, setContactDialogOpen] = useState(false);
-  const [contactSubject, setContactSubject] = useState("");
+  // AI search — enabled flag persisted in localStorage so it survives page refresh
+  const [aiEnabled, setAiEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem("aiuc_ai_search_enabled") !== "false"; }
+    catch { return true; }
+  });
+  const [aiQuery, setAiQuery] = useState("");
+  const { search: doAISearch, results: aiResults, loading: aiLoading, error: aiError, clearResults: clearAIResults } = useAISearch();
+  const aiMode = aiResults.length > 0 || aiLoading;
+  const aiResultsMap = useMemo(
+    () => new Map(aiResults.map(r => [r.useCase.id, r.whyMatched])),
+    [aiResults]
+  );
+
+  const handleAISearchToggle = (enabled: boolean) => {
+    setAiEnabled(enabled);
+    try { localStorage.setItem("aiuc_ai_search_enabled", String(enabled)); } catch { /* ignore */ }
+    if (!enabled) { clearAIResults(); setAiQuery(""); }
+    else { setGlobalFilter(""); }
+  };
+
+  const handleAISearch = () => {
+    if (aiQuery.trim()) doAISearch(aiQuery);
+  };
+
+  const handleClearAISearch = () => {
+    clearAIResults();
+    setAiQuery("");
+  };
+
+  // Gmail compose — no dialog state needed
 
   // Filter state
   type FilterState = {
@@ -359,9 +390,23 @@ export default function UseCaseTable({
 
 
   const handleContactClick = useCallback((aiUseCase: string) => {
-    setContactSubject(`Interest in: ${aiUseCase}`);
-    setContactDialogOpen(true);
-  }, []);
+    const subject = aiUseCase
+      ? `Interest in: ${aiUseCase}`
+      : "Request for Information";
+    const body = [
+      userEmail ? `From: ${userEmail}` : "",
+      `Use Case: ${aiUseCase || "N/A"}`,
+      "",
+      "Hi,",
+      "",
+      "I'm interested in this use case. Please contact me to discuss further.",
+      "",
+      "Thank you.",
+    ]
+      .filter((_line, i) => i !== 0 || userEmail)
+      .join("\n");
+    openGmailCompose(contactEmail, subject, body);
+  }, [userEmail, contactEmail]);
 
   const columns = useMemo<ColumnDef<UseCaseData>[]>(
     () => [
@@ -391,6 +436,37 @@ export default function UseCaseTable({
         ),
         size: 60,
       },
+      // "Why Matched" column — only visible in AI search mode
+      ...(aiMode ? [{
+        id: "whyMatched",
+        header: () => (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+            <AutoAwesomeIcon sx={{ fontSize: 14, color: PURE_ORANGE }} />
+            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.8rem" }}>
+              Why Matched
+            </Typography>
+          </Box>
+        ),
+        size: 200,
+        enableSorting: false,
+        cell: ({ row }) => {
+          const explanation = aiResultsMap.get(row.original.id);
+          return explanation ? (
+            <Typography
+              variant="body2"
+              sx={{
+                fontSize: "0.72rem",
+                color: "#555",
+                fontStyle: "italic",
+                lineHeight: 1.4,
+                py: 0.25,
+              }}
+            >
+              {explanation}
+            </Typography>
+          ) : null;
+        },
+      } as ColumnDef<UseCaseData>] : []),
       {
         accessorKey: "Capability",
         header: () => null,
@@ -705,11 +781,17 @@ export default function UseCaseTable({
         },
       },
     ],
-    [expandedRows, CustomHeader, renderChips, toggleRowExpansion, handleContactClick]
+    [expandedRows, CustomHeader, renderChips, toggleRowExpansion, handleContactClick, aiMode, aiResultsMap]
   );
 
+  // When AI mode is active use the ranked AI results; otherwise use the normally filtered data
+  const tableData = useMemo<UseCaseData[]>(() => {
+    if (aiMode && aiResults.length > 0) return aiResults.map(r => r.useCase);
+    return filteredData;
+  }, [aiMode, aiResults, filteredData]);
+
   const table = useReactTable({
-    data: filteredData,
+    data: tableData,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -771,16 +853,149 @@ export default function UseCaseTable({
         height: "100%",
       }}
     >
+      {/* ── AI Search Panel ─────────────────────────────────────────────────── */}
+      <Box
+        sx={{
+          mb: 1.5,
+          p: 1.5,
+          border: `1px solid ${aiEnabled && aiMode ? PURE_ORANGE : "#e0e0e0"}`,
+          borderRadius: "6px",
+          backgroundColor: aiEnabled && aiMode ? "#fff8f5" : "#fafafa",
+          transition: "all 0.2s ease",
+        }}
+      >
+        {/* Header row: icon + label + toggle + clear button */}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <AutoAwesomeIcon sx={{ fontSize: 16, color: aiEnabled ? PURE_ORANGE : "#aaa" }} />
+          <Typography variant="body2" sx={{ fontWeight: 700, fontSize: "0.8rem", color: aiEnabled ? "#1a1a1a" : "#aaa" }}>
+            AI Search
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={aiEnabled}
+                onChange={e => handleAISearchToggle(e.target.checked)}
+                sx={{
+                  "& .MuiSwitch-switchBase.Mui-checked": { color: PURE_ORANGE },
+                  "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { backgroundColor: PURE_ORANGE },
+                }}
+              />
+            }
+            label={
+              <Typography variant="body2" sx={{ fontSize: "0.72rem", color: "#666" }}>
+                {aiEnabled ? "On" : "Off"}
+              </Typography>
+            }
+            sx={{ ml: 0.5, mr: 0 }}
+          />
+          {aiEnabled && aiMode && (
+            <Button
+              size="small"
+              variant="text"
+              onClick={handleClearAISearch}
+              sx={{ ml: "auto", color: "#666", fontSize: "0.72rem", textTransform: "none", py: 0 }}
+            >
+              ✕ Clear — show all use cases
+            </Button>
+          )}
+        </Box>
+
+        {/* Search input — only shown when AI search is enabled */}
+        {aiEnabled && (
+          <>
+            <Box sx={{ display: "flex", gap: 1, alignItems: "center", mt: 1 }}>
+              <TextField
+                size="small"
+                fullWidth
+                placeholder="Describe what you're looking for — e.g. 'automate contract review using NLP'"
+                value={aiQuery}
+                onChange={e => setAiQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") handleAISearch(); }}
+                disabled={aiLoading}
+                sx={{
+                  "& .MuiOutlinedInput-root": {
+                    fontSize: "0.8rem",
+                    "&.Mui-focused fieldset": { borderColor: PURE_ORANGE },
+                  },
+                }}
+              />
+              <Button
+                variant="contained"
+                onClick={handleAISearch}
+                disabled={!aiQuery.trim() || aiLoading}
+                sx={{
+                  backgroundColor: PURE_ORANGE,
+                  "&:hover": { backgroundColor: "#cc4000" },
+                  "&.Mui-disabled": { backgroundColor: "#eee", color: "#aaa" },
+                  whiteSpace: "nowrap",
+                  minWidth: 100,
+                  fontSize: "0.78rem",
+                  py: "6px",
+                }}
+              >
+                {aiLoading ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : "Search with AI"}
+              </Button>
+            </Box>
+            {aiError && (
+              <Alert severity="error" sx={{ mt: 1, py: 0.5, fontSize: "0.8rem" }}>{aiError}</Alert>
+            )}
+            {aiMode && !aiLoading && aiResults.length > 0 && (
+              <Typography variant="body2" sx={{ mt: 0.75, color: "#666", fontSize: "0.72rem" }}>
+                ✓ {aiResults.length} semantic matches — ranked by relevance, AI explanations in "Why Matched"
+              </Typography>
+            )}
+          </>
+        )}
+        {!aiEnabled && (
+          <Box sx={{ mt: 1 }}>
+            <TextField
+              size="small"
+              fullWidth
+              placeholder="Search across all columns — e.g. 'contract', 'finance', 'NLP'"
+              value={globalFilter}
+              onChange={e => setGlobalFilter(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" sx={{ color: "#aaa" }} />
+                  </InputAdornment>
+                ),
+                endAdornment: globalFilter && (
+                  <InputAdornment position="end">
+                    <IconButton size="small" onClick={() => setGlobalFilter("")} sx={{ padding: "4px" }}>
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+              sx={{
+                "& .MuiOutlinedInput-root": {
+                  fontSize: "0.8rem",
+                  "&.Mui-focused fieldset": { borderColor: "#bbb" },
+                },
+              }}
+            />
+            {globalFilter && (
+              <Typography variant="body2" sx={{ mt: 0.75, color: "#666", fontSize: "0.72rem" }}>
+                {filteredData.length} result{filteredData.length !== 1 ? "s" : ""} matching "{globalFilter}"
+              </Typography>
+            )}
+          </Box>
+        )}
+      </Box>
+
       <Box
         sx={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          mb: 2,
+          mb: 1.5,
           gap: 2,
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          {/* Search all columns field — commented out
           <TextField
             size="small"
             placeholder="Search all columns..."
@@ -813,8 +1028,9 @@ export default function UseCaseTable({
               },
             }}
           />
+          */}
           <Typography variant="body2" sx={{ color: "#666", fontSize: "0.8rem", whiteSpace: "nowrap" }}>
-            {filteredData.length} use cases
+            {aiMode ? `${aiResults.length} AI matches` : `${filteredData.length} use cases`}
           </Typography>
         </Box>
         <Button
@@ -823,21 +1039,21 @@ export default function UseCaseTable({
           startIcon={<ClearIcon />}
           onClick={handleClearAllFilters}
           disabled={!hasActiveFilters}
-          sx={{
-            color: PURE_ORANGE,
-            borderColor: PURE_ORANGE,
-            "&:hover": {
-              borderColor: "#cc4000",
-              backgroundColor: "#fff5f2",
-            },
-            "&.Mui-disabled": {
-              color: "#bbb",
-              borderColor: "#ddd",
-            },
-          }}
-        >
-          Clear All Filters
-        </Button>
+            sx={{
+              color: PURE_ORANGE,
+              borderColor: PURE_ORANGE,
+              "&:hover": {
+                borderColor: "#cc4000",
+                backgroundColor: "#fff5f2",
+              },
+              "&.Mui-disabled": {
+                color: "#bbb",
+                borderColor: "#ddd",
+              },
+            }}
+          >
+            Clear All Filters
+          </Button>
       </Box>
 
       {error && (
@@ -860,7 +1076,7 @@ export default function UseCaseTable({
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
-            height: "100%",
+            flex: 1,
             padding: "16px 32px",
           }}
         >
@@ -870,7 +1086,8 @@ export default function UseCaseTable({
         <Paper
           sx={{
             width: "100%",
-            height: "100%",
+            flex: 1,
+            minHeight: 0,
             overflow: "auto",
             backgroundColor: "#ffffff",
             position: "relative",
@@ -1013,13 +1230,6 @@ export default function UseCaseTable({
         multiselectColumns={multiselectColumns}
         getUniqueValues={getUniqueValues}
         tableContainerRef={tableContainerRef}
-      />
-      <ContactDialog
-        open={contactDialogOpen}
-        onClose={() => setContactDialogOpen(false)}
-        userEmail={userEmail}
-        subject={contactSubject}
-        contactEmail={contactEmail}
       />
     </Box>
   );

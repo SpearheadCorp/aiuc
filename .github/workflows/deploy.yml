@@ -35,12 +35,51 @@ jobs:
         run: |
           aws s3 sync dist/ s3://${{ secrets.S3_BUCKET_NAME }}/dist/ --delete
 
+      - name: Sync data files to S3
+        run: |
+          aws s3 cp public/data/use_cases.json s3://${{ secrets.S3_BUCKET_NAME }}/use_cases.json
+          aws s3 cp public/data/industry_use_cases.json s3://${{ secrets.S3_BUCKET_NAME }}/industry_use_cases.json
+          if [ -f public/data/use_cases_embeddings.json ]; then
+            aws s3 cp public/data/use_cases_embeddings.json s3://${{ secrets.S3_BUCKET_NAME }}/use_cases_embeddings.json
+          fi
+          if [ -f public/data/industry_use_cases_embeddings.json ]; then
+            aws s3 cp public/data/industry_use_cases_embeddings.json s3://${{ secrets.S3_BUCKET_NAME }}/industry_use_cases_embeddings.json
+          fi
+
       - name: Build and deploy Lambda
         run: |
           cd lambda
+
+          # Install production dependencies only
           npm install --omit=dev
-          zip -r ../lambda.zip .
+
+          # ── Strip packages provided by the Lambda Node.js 20 runtime ─────────
+          # AWS SDK v3 (@aws-sdk/* + @smithy/*) ships in the Node.js 20 runtime —
+          # no need to bundle them, and excluding them saves ~18 MB.
+          rm -rf node_modules/@aws-sdk
+          rm -rf node_modules/@smithy
+          rm -rf node_modules/@aws-crypto
+
+          # ── Strip any other packages not needed at runtime ────────────────────
+          rm -rf node_modules/@types
+          rm -rf node_modules/@googleapis    # removed from package.json, but clean up if present
+          rm -rf node_modules/@xenova        # dev dep — should not be here, but guard anyway
+          rm -rf node_modules/@huggingface
+
+          # ── Zip only the Lambda handler and its remaining runtime deps ────────
+          # index.mjs  : the Lambda handler (~22 KB)
+          # package.json: required so Node.js treats this as an ESM package
+          # node_modules/: only jose (~460 KB) and its transitive deps remain
+          # Result: zip is well under 1 MB
+          zip -r ../lambda.zip index.mjs package.json node_modules/
+
           cd ..
+
+          echo "Lambda zip size: $(du -sh lambda.zip | cut -f1)"
+
+          # Upload via S3 then update function code
+          aws s3 cp lambda.zip s3://${{ secrets.S3_BUCKET_NAME }}/deployments/lambda.zip
           aws lambda update-function-code \
             --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
-            --zip-file fileb://lambda.zip
+            --s3-bucket ${{ secrets.S3_BUCKET_NAME }} \
+            --s3-key deployments/lambda.zip

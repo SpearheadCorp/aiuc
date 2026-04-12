@@ -39,11 +39,29 @@ Thumbs.db
 backup_nextjs/
 out/
 build/
+
+# Lambda deployment artifact
+lambda.zip
+
+# Generated embedding files (large, regenerate from source — see README)
+public/data/*_embeddings.json
+
 # Local Gmail test files (contain credentials / generated output)
 lambda/test-gmail-send-local.mjs
 lambda/test-template-local.mjs
 lambda/test-email-output.html
 lambda/work.txt
 lambda/get-gmail-token.mjs
-local-server.mjs
-lambda/local-server.mjs
+
+# Working notes / scratch files
+work.md
+work.txt
+Todo.txt
+error.txt
+logs.txt
+image.png
+public/work.svg
+
+# Claude Code session continuation files
+*-this-session-is-being-continued-*.txt
+2026-*-*.txt
