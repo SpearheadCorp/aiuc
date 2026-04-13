@@ -2,14 +2,25 @@
  * Local development API server — mirrors the Lambda API routes.
  * Run from project root: npm run dev:server
  * Listens on http://localhost:3001
+ *
+ * Uses shared core/ modules for search logic (same code paths as Lambda).
+ * Differences from Lambda:
+ *   - Loads embeddings from local public/data/ instead of S3
+ *   - Uses AWS credential profile instead of Lambda IAM role
+ *   - No auth enforcement (for dev convenience)
  */
 
 import { createServer } from "http";
 import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
+import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
+
+import { getEmbedding, l2normalize } from "./core/embeddings.mjs";
+import { createFlatIPIndex, runVectorSearch, runKeywordSearch, USE_CASE_FIELDS, INDUSTRY_FIELDS } from "./core/search.mjs";
+import { generateExplanations, FALLBACK_WHY } from "./core/why_matched.mjs";
+import { ENABLE_AI_SEARCH } from "./core/ai_toggle.mjs";
 
 // ── Load .env.local from project root ────────────────────────────────────────
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -31,90 +42,42 @@ if (existsSync(envPath)) {
   console.warn("⚠ .env.local not found — set env vars manually");
 }
 
-const BEDROCK_REGION  = process.env.AWS_REGION  || "us-east-2";
-const AWS_PROFILE     = process.env.AWS_PROFILE || "Praveen";
+const BEDROCK_REGION = process.env.AWS_REGION  || "us-east-2";
+const AWS_PROFILE    = process.env.AWS_PROFILE || "Praveen";
 
-// ── Bedrock Titan embedding client (1024-dim, matches generated embeddings) ───
+const OKTA_ISSUER    = process.env.VITE_OKTA_ISSUER    || "";
+const OKTA_CLIENT_ID = process.env.VITE_OKTA_CLIENT_ID || "";
+
+// ── Bedrock client (credential profile for local dev) ─────────────────────────
 const bedrock = new BedrockRuntimeClient({
   region:      BEDROCK_REGION,
   credentials: fromIni({ profile: AWS_PROFILE }),
 });
 
-const OKTA_ISSUER    = process.env.VITE_OKTA_ISSUER    || "";
-const OKTA_CLIENT_ID = process.env.VITE_OKTA_CLIENT_ID || "";
+// ── Local file-based search index (mirrors S3 loading in Lambda) ──────────────
+// Builds a FlatIP index from a local embeddings JSON file on first call.
+// Cache prevents re-loading on every request.
+const localIndexCache = new Map();
 
-// ── Bedrock Titan embedding (1024-dim, same model as Lambda + generate scripts) ─
-async function embedText(text) {
-  const command = new InvokeModelCommand({
-    modelId:     "amazon.titan-embed-text-v2:0",
-    contentType: "application/json",
-    accept:      "application/json",
-    body: JSON.stringify({ inputText: text, dimensions: 1024, normalize: true }),
+function loadLocalIndex(filePath, itemKey, logPrefix) {
+  if (localIndexCache.has(filePath)) return localIndexCache.get(filePath);
+
+  if (!existsSync(filePath)) return null;
+
+  const raw = JSON.parse(readFileSync(filePath, "utf8"));
+  const index = createFlatIPIndex();
+  const meta = raw.map(record => {
+    index.add(l2normalize(record.embedding));
+    return record[itemKey];
   });
-  const response = await bedrock.send(command);
-  const result   = JSON.parse(Buffer.from(response.body).toString("utf-8"));
-  if (!Array.isArray(result.embedding)) throw new Error("Bedrock Titan: unexpected response shape");
-  console.log(`[Embedder] dim=${result.embedding.length}`);
-  return result.embedding;
+
+  console.log(`${logPrefix} ready: ${index.ntotal()} vectors (local)`);
+  const result = { index, meta };
+  localIndexCache.set(filePath, result);
+  return result;
 }
 
-// ── AI Search helpers ─────────────────────────────────────────────────────────
-function cosineSimilarity(a, b) {
-  let dot = 0, magA = 0, magB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    magA += a[i] * a[i];
-    magB += b[i] * b[i];
-  }
-  return dot / (Math.sqrt(magA) * Math.sqrt(magB));
-}
-
-// ── Bedrock "why matched" explanation ─────────────────────────────────────────
-// Uses amazon.nova-lite-v1:0 — mirrors lambda/index.mjs exactly.
-const WHY_MATCHED_MODEL = "amazon.nova-lite-v1:0";
-const FALLBACK_WHY      = "Matched based on semantic similarity to your query.";
-
-async function generateExplanations(query, items, formatItem) {
-  if (items.length === 0) return [];
-
-  const safeQuery = query.replace(/"/g, '\\"');
-  const list = items.map((item, i) => `${i + 1}. ${formatItem(item)}`).join("\n");
-
-  const prompt = `You are an AI analyst helping employees find relevant AI use cases for their company's internal tool.
-
-User's search query: "${safeQuery}"
-
-The following use cases were retrieved as semantic matches. For each one (numbered 1 to ${items.length}), write exactly 1–2 concise sentences explaining specifically why it matches the user's query. Be concrete about the connection.
-
-${list}
-
-Respond ONLY with a JSON array of strings, one per use case in the same order:
-["explanation for 1", "explanation for 2", ...]`;
-
-  try {
-    const command = new InvokeModelCommand({
-      modelId:     WHY_MATCHED_MODEL,
-      contentType: "application/json",
-      accept:      "application/json",
-      body: JSON.stringify({
-        messages:        [{ role: "user", content: [{ text: prompt }] }],
-        inferenceConfig: { temperature: 0.2, maxTokens: 1024 },
-      }),
-    });
-    const response = await bedrock.send(command);
-    const result   = JSON.parse(Buffer.from(response.body).toString("utf-8"));
-    const text     = result.output?.message?.content?.[0]?.text || "[]";
-    const match    = text.match(/\[[\s\S]*\]/);
-    if (!match) return items.map(() => FALLBACK_WHY);
-    const parsed = JSON.parse(match[0]);
-    return Array.isArray(parsed) ? parsed : items.map(() => FALLBACK_WHY);
-  } catch (err) {
-    console.error("[WhyMatched] Bedrock error:", err.message);
-    return items.map(() => FALLBACK_WHY);
-  }
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function sendJson(res, status, data) {
   res.writeHead(status, {
     "Content-Type": "application/json",
@@ -132,7 +95,7 @@ function readBody(req) {
   });
 }
 
-// ── Server ───────────────────────────────────────────────────────────────────
+// ── Server ────────────────────────────────────────────────────────────────────
 createServer(async (req, res) => {
   const path = new URL(req.url, "http://localhost:3001").pathname;
   const method = req.method;
@@ -165,58 +128,6 @@ createServer(async (req, res) => {
     return sendJson(res, 200, existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : []);
   }
 
-  // // POST /api/contact
-  // if (path === "/api/contact" && method === "POST") {
-  //   try {
-  //     const { from, subject, message } = JSON.parse(await readBody(req) || "{}");
-
-  //     if (!from || !subject || !message)
-  //       return sendJson(res, 400, { error: "Missing required fields: from, subject, message" });
-
-  //     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from))
-  //       return sendJson(res, 400, { error: "Invalid email address" });
-
-  //     if (!GMAIL_CLIENT_ID || !GMAIL_CLIENT_SECRET || !GMAIL_REFRESH_TOKEN)
-  //       return sendJson(res, 503, { error: "Gmail not configured in .env.local" });
-
-  //     const safeSubject = subject.replace(/[\r\n]/g, "");
-  //     const safeFrom    = from.replace(/[\r\n]/g, "");
-
-  //     const oauth2Client = new google.auth.OAuth2(GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET);
-  //     oauth2Client.setCredentials({ refresh_token: GMAIL_REFRESH_TOKEN });
-  //     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
-
-  //     const htmlBody = buildEmailHtml({
-  //       fromEmail:   safeFrom,
-  //       subject:     safeSubject,
-  //       message,
-  //       contactEmail: CONTACT_EMAIL,
-  //       headerTitle:  EMAIL_HEADER_TITLE,
-  //       brandColor:   EMAIL_BRAND_COLOR,
-  //       companyName:  EMAIL_COMPANY_NAME,
-  //     });
-
-  //     const rawMsg = Buffer.from([
-  //       `From: ${GMAIL_SENDER}`,
-  //       `To: ${CONTACT_EMAIL}`,
-  //       `Reply-To: ${safeFrom}`,
-  //       `Subject: ${safeSubject}`,
-  //       `MIME-Version: 1.0`,
-  //       `Content-Type: text/html; charset=UTF-8`,
-  //       ``,
-  //       htmlBody,
-  //     ].join("\r\n")).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-
-  //     const result = await gmail.users.messages.send({ userId: "me", requestBody: { raw: rawMsg } });
-  //     console.log(`✓ Email sent — Gmail ID: ${result.data.id}`);
-  //     return sendJson(res, 200, { success: true, message: "Email sent successfully" });
-
-  //   } catch (err) {
-  //     console.error("✗ Email error:", err.message);
-  //     return sendJson(res, 500, { error: "Failed to send email. Please try again later." });
-  //   }
-  // }
-
   // POST /api/search/industry
   if (path === "/api/search/industry" && method === "POST") {
     try {
@@ -227,32 +138,47 @@ createServer(async (req, res) => {
       const safeLimit = Math.min(Math.max(1, Number(limit) || 10), 15);
 
       const embFile = resolve(__dir, "../public/data/industry_use_cases_embeddings.json");
-      if (!existsSync(embFile)) {
+      const cached = loadLocalIndex(embFile, "item", "[IndustrySearchIndex]");
+
+      if (!cached) {
         return sendJson(res, 503, {
           error: "Industry embeddings file not found. Run: node lambda/generate-embeddings-industry-local.mjs",
         });
       }
-      const embeddings = JSON.parse(readFileSync(embFile, "utf8"));
 
-      const queryEmbedding = await embedText(queryText);
+      const { index, meta } = cached;
+      let results;
+      let searchMode;
 
-      const scored = embeddings.map(e => ({
-        item: e.item,
-        score: cosineSimilarity(queryEmbedding, e.embedding),
-      }));
-      scored.sort((a, b) => b.score - a.score);
-      const topResults = scored.slice(0, safeLimit);
+      if (ENABLE_AI_SEARCH) {
+        try {
+          const queryVec = await getEmbedding(queryText, bedrock);
+          results = runVectorSearch(index, meta, queryVec, safeLimit);
+          searchMode = "vector";
+        } catch (err) {
+          console.warn(`[IndustrySearch] embedding failed → keyword fallback: ${err.message}`);
+          results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit);
+          searchMode = "keyword-fallback";
+        }
+      } else {
+        results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit);
+        searchMode = "keyword";
+      }
 
-      const explanations = await generateExplanations(queryText, topResults.map(r => r.item), item =>
-        `"${item.ai_use_case || ""}" — ${item.industry || ""} / ${item.business_function || ""}: ${item.description || ""}`
+      const items = results.map(r => r.data);
+      const explanations = await generateExplanations(
+        queryText,
+        items,
+        item => `"${item.ai_use_case || ""}" — ${item.industry || ""} / ${item.business_function || ""}: ${item.description || ""}`,
+        bedrock
       );
 
-      console.log(`[IndustrySearch] "${queryText.slice(0, 60)}…" → ${topResults.length} results`);
+      console.log(`[IndustrySearch] mode=${searchMode} "${queryText.slice(0, 60)}…" → ${results.length} results`);
       return sendJson(res, 200, {
-        results: topResults.map((r, i) => ({
-          item: r.item,
+        results: results.map((r, i) => ({
+          item: r.data,
           score: r.score,
-          whyMatched: explanations[i] || "Matched based on semantic similarity to your query.",
+          whyMatched: explanations[i] || FALLBACK_WHY,
         })),
       });
     } catch (err) {
@@ -271,32 +197,47 @@ createServer(async (req, res) => {
       const safeLimit = Math.min(Math.max(1, Number(limit) || 10), 15);
 
       const embFile = resolve(__dir, "../public/data/use_cases_embeddings.json");
-      if (!existsSync(embFile)) {
+      const cached = loadLocalIndex(embFile, "useCase", "[SearchIndex]");
+
+      if (!cached) {
         return sendJson(res, 503, {
           error: "Embeddings file not found. Run: node lambda/generate-embeddings-local.mjs",
         });
       }
-      const embeddings = JSON.parse(readFileSync(embFile, "utf8"));
 
-      const queryEmbedding = await embedText(queryText);
+      const { index, meta } = cached;
+      let results;
+      let searchMode;
 
-      const scored = embeddings.map(e => ({
-        useCase: e.useCase,
-        score: cosineSimilarity(queryEmbedding, e.embedding),
-      }));
-      scored.sort((a, b) => b.score - a.score);
-      const topResults = scored.slice(0, safeLimit);
+      if (ENABLE_AI_SEARCH) {
+        try {
+          const queryVec = await getEmbedding(queryText, bedrock);
+          results = runVectorSearch(index, meta, queryVec, safeLimit);
+          searchMode = "vector";
+        } catch (err) {
+          console.warn(`[Search] embedding failed → keyword fallback: ${err.message}`);
+          results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit);
+          searchMode = "keyword-fallback";
+        }
+      } else {
+        results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit);
+        searchMode = "keyword";
+      }
 
-      const explanations = await generateExplanations(queryText, topResults.map(r => r.useCase), uc =>
-        `"${uc.ai_use_case || ""}" — ${uc.business_function || ""} / ${uc.business_capability || ""}: ${uc.action_implementation || ""}`
+      const useCases = results.map(r => r.data);
+      const explanations = await generateExplanations(
+        queryText,
+        useCases,
+        uc => `"${uc.ai_use_case || ""}" — ${uc.business_function || ""} / ${uc.business_capability || ""}: ${uc.action_implementation || ""}`,
+        bedrock
       );
 
-      console.log(`[Search] "${queryText.slice(0, 60)}…" → ${topResults.length} results`);
+      console.log(`[Search] mode=${searchMode} "${queryText.slice(0, 60)}…" → ${results.length} results`);
       return sendJson(res, 200, {
-        results: topResults.map((r, i) => ({
-          useCase: r.useCase,
+        results: results.map((r, i) => ({
+          useCase: r.data,
           score: r.score,
-          whyMatched: explanations[i] || "Matched based on semantic similarity to your query.",
+          whyMatched: explanations[i] || FALLBACK_WHY,
         })),
       });
     } catch (err) {
@@ -311,6 +252,6 @@ createServer(async (req, res) => {
   console.log("\n✓ Local API server running at http://localhost:3001");
   console.log("  Okta issuer  :", OKTA_ISSUER    || "⚠ NOT SET");
   console.log("  Okta clientId:", OKTA_CLIENT_ID || "⚠ NOT SET");
-  console.log("  Bedrock model:", WHY_MATCHED_MODEL, "(why-matched explanations)");
+  console.log("  AI search    :", ENABLE_AI_SEARCH ? "enabled" : "disabled (keyword fallback)");
   console.log("\nReady — waiting for Vite proxy requests...\n");
 });

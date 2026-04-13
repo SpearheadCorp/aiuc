@@ -469,6 +469,128 @@ Expected:
 
 ---
 
+## Section 3b — AI Search (RAG) Configuration
+
+The app uses Amazon Bedrock for semantic search. This section documents how to enable/disable AI search, the required IAM permissions, and how to set up the S3 embeddings files.
+
+### How AI Search Works
+
+```
+User query (text)
+    │
+    ▼
+Lambda: getEmbedding(query)           ← Bedrock Titan Text Embeddings v2 (1024-dim)
+    │
+    ▼
+Vector similarity search              ← FlatIP index loaded from S3 embeddings JSON
+    │
+    ▼
+Top-K results
+    │
+    ▼
+generateExplanations(query, results)  ← Bedrock Nova Lite (1–2 sentence explanations)
+    │
+    ▼
+Response: [{ useCase/item, score, whyMatched }]
+```
+
+If Bedrock is unavailable or `ENABLE_AI_SEARCH=false`, the system falls back to keyword search automatically — no user-facing error.
+
+### Enable / Disable AI Search
+
+| Lambda env var | Value | Behaviour |
+|----------------|-------|-----------|
+| `ENABLE_AI_SEARCH` | `true` (default) | Semantic vector search + AI explanations |
+| `ENABLE_AI_SEARCH` | `false` | Keyword-only fallback, no Bedrock calls |
+
+Set this in **AWS Lambda Console → Configuration → Environment variables**. No redeployment needed — the flag is read at invocation time.
+
+### Required IAM Permissions (Lambda Execution Role)
+
+Add this inline policy (`aiuc-bedrock-invoke`) to your Lambda execution role:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": [
+        "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
+        "arn:aws:bedrock:*::foundation-model/us.amazon.nova-lite-v1:0"
+      ]
+    }
+  ]
+}
+```
+
+> Without this policy, search falls back to keyword mode and logs `[Embedding] Bedrock error: AccessDeniedException`.
+
+### Bedrock Model IDs
+
+| Purpose | Model ID |
+|---------|----------|
+| Embeddings | `amazon.titan-embed-text-v2:0` |
+| Why Matched explanations | `us.amazon.nova-lite-v1:0` |
+
+Both models must be enabled in your AWS account via **Amazon Bedrock → Model access → Manage model access**.
+
+### S3 Embeddings Setup
+
+Pre-computed embeddings must be uploaded to S3 before AI search works:
+
+```
+your-bucket/
+├── use_cases_embeddings.json           ← array of { useCase, embedding }
+└── industry_use_cases_embeddings.json  ← array of { item, embedding }
+```
+
+**Step 1 — Generate embeddings (run once per dataset update):**
+
+```bash
+# Use-case embeddings
+node lambda/generate-embeddings-local.mjs
+
+# Industry embeddings
+node lambda/generate-embeddings-industry-local.mjs
+```
+
+Both scripts read from `public/data/*.json`, call Bedrock Titan, and write to `public/data/*_embeddings.json`. Requires AWS credentials with `bedrock:InvokeModel` permission.
+
+**Step 2 — Upload to S3:**
+
+```bash
+aws s3 cp public/data/use_cases_embeddings.json \
+    s3://your-bucket/use_cases_embeddings.json
+
+aws s3 cp public/data/industry_use_cases_embeddings.json \
+    s3://your-bucket/industry_use_cases_embeddings.json
+```
+
+**Custom S3 paths** — override the default keys via Lambda env vars:
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `USE_CASES_EMBEDDINGS_KEY` | `use_cases_embeddings.json` | S3 key for use-case embeddings |
+| `INDUSTRY_EMBEDDINGS_KEY` | `industry_use_cases_embeddings.json` | S3 key for industry embeddings |
+
+This is how multiple deployments (PureStorage, Spearhead, etc.) can share the same Lambda codebase while pointing at their own datasets.
+
+### Shared Core Module
+
+All RAG logic lives in `lambda/core/` and is imported by both PureStorage and Spearhead. **Do not duplicate** any function from this directory in client-specific Lambda handlers.
+
+| File | Exports |
+|------|---------|
+| `core/embeddings.mjs` | `getEmbedding`, `l2normalize` |
+| `core/search.mjs` | `loadSearchIndex`, `runVectorSearch`, `runKeywordSearch`, `createFlatIPIndex`, `USE_CASE_FIELDS`, `INDUSTRY_FIELDS` |
+| `core/ai_toggle.mjs` | `ENABLE_AI_SEARCH` |
+| `core/why_matched.mjs` | `generateExplanations`, `FALLBACK_WHY`, `WHY_MATCHED_MODEL` |
+| `core/api_handlers.mjs` | `handleUseCaseSearch`, `handleIndustrySearch` |
+
+---
+
 ## Section 4 — S3 Bucket Structure
 
 ```
@@ -712,6 +834,7 @@ Replace `ACCOUNT_ID` with your 12-digit AWS account ID.
 - [ ] Lambda Function URL configured (Auth type: `NONE` for public access)
 - [ ] `aiuc-s3-read` inline policy attached to Lambda execution role (Section 8)
 - [ ] `aiuc-secrets-manager-read` inline policy attached to Lambda execution role (Section 3)
+- [ ] `aiuc-bedrock-invoke` inline policy attached to Lambda execution role (Section 3b) — required for AI search
 
 **Okta:**
 - [ ] Secret `aiuc/okta` created in Secrets Manager with key `OKTA_CLIENT_ID` (Section 3)
