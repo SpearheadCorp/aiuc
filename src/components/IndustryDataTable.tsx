@@ -37,6 +37,8 @@ import {
   Divider,
   Paper,
   Tooltip,
+  Switch,
+  FormControlLabel,
 } from "@mui/material";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import SearchIcon from "@mui/icons-material/Search";
@@ -161,18 +163,32 @@ export default function IndustryDataTable({
     field: string;
   } | null>(null);
 
-  // NL search state
+  // NL / AI search state
   const [nlQuery, setNlQuery] = useState("");
   const [searchResults, setSearchResults] = useState<IndustrySearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const { searchIndustry } = useSearchApi();
 
+  // AI search toggle — persisted to localStorage so it survives page refresh
+  const [aiEnabled, setAiEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem("aiuc_ai_search_enabled_industry") !== "false"; }
+    catch { return true; }
+  });
+
+  const handleAISearchToggle = (enabled: boolean) => {
+    setAiEnabled(enabled);
+    try { localStorage.setItem("aiuc_ai_search_enabled_industry", String(enabled)); } catch { /* ignore */ }
+    if (!enabled) { setNlQuery(""); setSearchResults([]); setSearchError(null); }
+    else { setGlobalFilter(""); }
+  };
+
   const searchMode = searchResults.length > 0;
 
   const handleNLSearch = async () => {
     const q = nlQuery.trim();
-    if (!q) return;
+    if (!q || !isRegistered || !aiEnabled) return;
+    setGlobalFilter("");
     setIsSearching(true);
     setSearchError(null);
     try {
@@ -954,80 +970,144 @@ export default function IndustryDataTable({
         height: "100%",
       }}
     >
-      {/* AI Natural Language Search */}
-      <Box sx={{ mb: 2 }}>
-        <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-          <TextField
-            size="small"
-            fullWidth
-            placeholder="Describe what you're looking for… e.g. 'AI use cases for healthcare supply chain optimization'"
-            value={nlQuery}
-            onChange={(e) => setNlQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleNLSearch(); }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <AutoAwesomeIcon fontSize="small" sx={{ color: PURE_ORANGE }} />
-                </InputAdornment>
-              ),
-              endAdornment: nlQuery && (
-                <InputAdornment position="end">
-                  <IconButton size="small" onClick={handleClearSearch} sx={{ padding: "4px" }}>
-                    <ClearIcon fontSize="small" />
-                  </IconButton>
-                </InputAdornment>
-              ),
-            }}
-            sx={{
-              "& .MuiOutlinedInput-root": {
-                "&.Mui-focused fieldset": { borderColor: PURE_ORANGE },
-              },
-            }}
-          />
-          <Button
-            variant="contained"
-            size="small"
-            onClick={handleNLSearch}
-            disabled={isSearching || !nlQuery.trim()}
-            sx={{
-              backgroundColor: PURE_ORANGE,
-              color: "#fff",
-              textTransform: "none",
-              whiteSpace: "nowrap",
-              boxShadow: "none",
-              "&:hover": { backgroundColor: "#1a6bbf", boxShadow: "none" },
-              "&.Mui-disabled": { backgroundColor: "#ccc" },
-            }}
-          >
-            {isSearching ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : "AI Search"}
-          </Button>
-          {searchMode && (
+      {/* ── AI Search Panel ─────────────────────────────────── */}
+      <Box
+        sx={{
+          mb: 1.5,
+          p: 1.5,
+          border: `1px solid ${aiEnabled && searchMode ? PURE_ORANGE : "#e0e0e0"}`,
+          borderRadius: "6px",
+          backgroundColor: aiEnabled && searchMode ? "#fff8f5" : "#fafafa",
+          transition: "all 0.2s ease",
+        }}
+      >
+        {/* Header row: icon + label + toggle + clear button */}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <AutoAwesomeIcon sx={{ fontSize: 16, color: aiEnabled && isRegistered ? PURE_ORANGE : "#aaa" }} />
+          <Typography variant="body2" sx={{ fontWeight: 700, fontSize: "0.8rem", color: aiEnabled && isRegistered ? "#1a1a1a" : "#aaa" }}>
+            AI Search
+          </Typography>
+          <Tooltip title={!isRegistered ? "Login to use AI Search" : ""} placement="right">
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={aiEnabled}
+                  disabled={!isRegistered}
+                  onChange={e => handleAISearchToggle(e.target.checked)}
+                  sx={{
+                    "& .MuiSwitch-switchBase.Mui-checked": { color: PURE_ORANGE },
+                    "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { backgroundColor: PURE_ORANGE },
+                  }}
+                />
+              }
+              label={
+                <Typography variant="body2" sx={{ fontSize: "0.72rem", color: "#666" }}>
+                  {aiEnabled ? "On" : "Off"}
+                </Typography>
+              }
+              sx={{ ml: 0.5, mr: 0 }}
+            />
+          </Tooltip>
+          {!isRegistered && (
+            <Typography variant="body2" sx={{ fontSize: "0.72rem", color: "#999", display: "flex", alignItems: "center", gap: 0.5 }}>
+              <LockIcon sx={{ fontSize: 12 }} />
+              Login to use AI Search
+            </Typography>
+          )}
+          {aiEnabled && searchMode && (
             <Button
-              variant="outlined"
               size="small"
+              variant="text"
               onClick={handleClearSearch}
-              sx={{
-                color: PURE_ORANGE,
-                borderColor: PURE_ORANGE,
-                textTransform: "none",
-                whiteSpace: "nowrap",
-                "&:hover": { borderColor: "#1a6bbf" },
-              }}
+              sx={{ ml: "auto", color: "#666", fontSize: "0.72rem", textTransform: "none", py: 0 }}
             >
-              Show All
+              ✕ Clear — show all industry items
             </Button>
           )}
         </Box>
-        {searchError && (
-          <Typography variant="body2" sx={{ color: "#c62828", mt: 0.5, fontSize: "0.8rem" }}>
-            {searchError}
-          </Typography>
+
+        {/* AI search input — shown when enabled and logged in */}
+        {aiEnabled && isRegistered && (
+          <>
+            <Box sx={{ display: "flex", gap: 1, alignItems: "center", mt: 1 }}>
+              <TextField
+                size="small"
+                fullWidth
+                placeholder="Describe what you're looking for — e.g. 'AI use cases for healthcare supply chain optimization'"
+                value={nlQuery}
+                onChange={(e) => setNlQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleNLSearch(); }}
+                disabled={isSearching}
+                sx={{
+                  "& .MuiOutlinedInput-root": {
+                    fontSize: "0.8rem",
+                    "&.Mui-focused fieldset": { borderColor: PURE_ORANGE },
+                  },
+                }}
+              />
+              <Button
+                variant="contained"
+                onClick={handleNLSearch}
+                disabled={!nlQuery.trim() || isSearching}
+                sx={{
+                  backgroundColor: PURE_ORANGE,
+                  color: "#fff",
+                  textTransform: "none",
+                  whiteSpace: "nowrap",
+                  minWidth: 120,
+                  fontSize: "0.78rem",
+                  py: "6px",
+                  boxShadow: "none",
+                  "&:hover": { backgroundColor: "#1a6bbf", boxShadow: "none" },
+                  "&.Mui-disabled": { backgroundColor: "#eee", color: "#aaa" },
+                }}
+              >
+                {isSearching ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : "Search with AI"}
+              </Button>
+            </Box>
+            {searchError && (
+              <Alert severity="error" sx={{ mt: 1, py: 0.5, fontSize: "0.8rem" }}>{searchError}</Alert>
+            )}
+            {searchMode && !isSearching && (
+              <Typography variant="body2" sx={{ mt: 0.75, color: "#666", fontSize: "0.72rem" }}>
+                ✓ {searchResults.length} semantic matches — ranked by relevance, AI explanations in "Why Matched"
+              </Typography>
+            )}
+          </>
         )}
-        {searchMode && (
-          <Typography variant="body2" sx={{ color: PURE_ORANGE, mt: 0.5, fontSize: "0.8rem", display: "flex", alignItems: "center", gap: 0.5 }}>
-            <AutoAwesomeIcon sx={{ fontSize: 12 }} />
-            Showing {searchResults.length} AI-matched results for "{nlQuery}"
-          </Typography>
+
+        {/* Keyword search — shown when AI is toggled off OR user is not logged in */}
+        {(!aiEnabled || !isRegistered) && (
+          <Box sx={{ mt: 1 }}>
+            <TextField
+              size="small"
+              fullWidth
+              placeholder="Search across all columns — e.g. 'supply chain', 'healthcare', 'NLP'"
+              value={globalFilter}
+              onChange={(e) => setGlobalFilter(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" sx={{ color: "#aaa" }} />
+                  </InputAdornment>
+                ),
+                endAdornment: globalFilter && (
+                  <InputAdornment position="end">
+                    <IconButton size="small" onClick={() => setGlobalFilter("")} sx={{ padding: "4px" }}>
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+              sx={{
+                "& .MuiOutlinedInput-root": {
+                  fontSize: "0.8rem",
+                  "&.Mui-focused fieldset": { borderColor: "#bbb" },
+                },
+              }}
+            />
+          </Box>
         )}
       </Box>
 
@@ -1040,38 +1120,6 @@ export default function IndustryDataTable({
           gap: 2,
         }}
       >
-        <TextField
-          size="small"
-          placeholder="Search all columns..."
-          value={globalFilter}
-          onChange={(e) => setGlobalFilter(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" />
-              </InputAdornment>
-            ),
-            endAdornment: globalFilter && (
-              <InputAdornment position="end">
-                <IconButton
-                  size="small"
-                  onClick={() => setGlobalFilter("")}
-                  sx={{ padding: "4px" }}
-                >
-                  <ClearIcon fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ),
-          }}
-          sx={{
-            width: 300,
-            "& .MuiOutlinedInput-root": {
-              "&.Mui-focused fieldset": {
-                borderColor: PURE_ORANGE,
-              },
-            },
-          }}
-        />
         <Typography
           variant="body2"
           sx={{ color: "#666", fontSize: "0.8rem", fontWeight: 500, whiteSpace: "nowrap" }}

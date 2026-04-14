@@ -644,8 +644,12 @@ export async function handler(event) {
         }
     }
 
-    // --- RAG search routes ---
+    // --- RAG search routes (authentication required) ---
     if ((path === "/api/search" || path === "/api/search/") && method === "POST") {
+        const authenticated = await isRequestAuthenticated(event);
+        if (!authenticated) {
+            return { statusCode: 401, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Authentication required to use AI search." }) };
+        }
         try {
             const body = JSON.parse(event.body || "{}");
             const { query, limit } = body;
@@ -668,6 +672,10 @@ export async function handler(event) {
     }
 
     if ((path === "/api/search/industry" || path === "/api/search/industry/") && method === "POST") {
+        const authenticated = await isRequestAuthenticated(event);
+        if (!authenticated) {
+            return { statusCode: 401, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Authentication required to use AI search." }) };
+        }
         try {
             const body = JSON.parse(event.body || "{}");
             const { query, limit } = body;
