@@ -22,7 +22,76 @@ const BASE_PATH = (process.env.BASE_PATH || "").replace(/\/$/, "");
 // S3 keys for pre-computed embeddings (PureStorage-specific paths).
 // Override via Lambda env vars to point at a different bucket location.
 const USE_CASES_EMBEDDINGS_KEY = process.env.USE_CASES_EMBEDDINGS_KEY || "use_cases_embeddings.json";
-const INDUSTRY_EMBEDDINGS_KEY = process.env.INDUSTRY_EMBEDDINGS_KEY || "industry_use_cases_embeddings.json";
+const INDUSTRY_EMBEDDINGS_KEY  = process.env.INDUSTRY_EMBEDDINGS_KEY  || "industry_use_cases_embeddings.json";
+
+// ── Search rate limiting ──────────────────────────────────────────────────────
+// Sliding-window rate limit applied to /api/search* to protect Bedrock costs.
+// Combined with Lambda reserved concurrency (set in AWS console/CLI) for a
+// hard cap on parallel Bedrock invocations.
+//
+// Tune via Lambda env vars:
+//   SEARCH_RATE_LIMIT_MAX        — max requests per window per user (default: 10)
+//   SEARCH_RATE_LIMIT_WINDOW_MS  — rolling window in milliseconds (default: 60000 = 1 min)
+const RATE_LIMIT_MAX    = Math.max(1, parseInt(process.env.SEARCH_RATE_LIMIT_MAX        || "10",    10));
+const RATE_LIMIT_WINDOW = Math.max(1, parseInt(process.env.SEARCH_RATE_LIMIT_WINDOW_MS  || "60000", 10));
+
+// Per-user request timestamp store — lives for the lifetime of this Lambda container.
+// Key: userId (JWT sub claim).  Value: array of request timestamps (ms).
+const rateLimitStore = new Map();
+
+/**
+ * Check whether the given user has exceeded the rate limit.
+ * Returns { limited: false } if the request is allowed and records it.
+ * Returns { limited: true, retryAfterSeconds: N } when the limit is exceeded.
+ *
+ * @param {string} userId - Stable user identifier (JWT `sub` claim)
+ */
+function checkRateLimit(userId) {
+    const now         = Date.now();
+    const windowStart = now - RATE_LIMIT_WINDOW;
+
+    // Keep only timestamps within the current window
+    const prev = rateLimitStore.get(userId) ?? [];
+    const inWindow = prev.filter(t => t > windowStart);
+
+    if (inWindow.length >= RATE_LIMIT_MAX) {
+        // Retry-After = time until the oldest request in the window falls out
+        const retryAfterMs = Math.max(0, inWindow[0] + RATE_LIMIT_WINDOW - now);
+        console.warn(`[RateLimit] userId=${userId} hit limit (${inWindow.length}/${RATE_LIMIT_MAX} in ${RATE_LIMIT_WINDOW}ms)`);
+        return { limited: true, retryAfterSeconds: Math.ceil(retryAfterMs / 1000) };
+    }
+
+    inWindow.push(now);
+    rateLimitStore.set(userId, inWindow);
+
+    // Prune stale entries if the store grows beyond 5 000 users (memory guard)
+    if (rateLimitStore.size > 5000) {
+        for (const [uid, timestamps] of rateLimitStore) {
+            if (timestamps.every(t => t <= windowStart)) rateLimitStore.delete(uid);
+        }
+    }
+
+    return { limited: false };
+}
+
+/**
+ * Decode the `sub` claim from an already-verified JWT without re-validating
+ * the signature. Safe to call only after requireAuth() has returned null.
+ *
+ * @param {object} event - Lambda event
+ * @returns {string} userId (JWT sub) or "unknown"
+ */
+function getUserIdFromToken(event) {
+    const authHeader = event.headers?.authorization || event.headers?.Authorization || "";
+    if (!authHeader.startsWith("Bearer ")) return "unknown";
+    try {
+        const payloadB64 = authHeader.slice(7).split(".")[1];
+        const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
+        return payload.sub || payload.email || "unknown";
+    } catch {
+        return "unknown";
+    }
+}
 
 // ── MIME types ────────────────────────────────────────────────────────────────
 const MIME_TYPES = {
@@ -174,10 +243,27 @@ export async function handler(event) {
         return getS3Object("industry_use_cases.json", "application/json", "no-cache, no-store, must-revalidate");
     }
 
-    // ── POST /api/search (auth required) ─────────────────────────────────────
+    // ── POST /api/search (auth + rate limit required) ────────────────────────
     if ((path === "/api/search" || path === "/api/search/") && method === "POST") {
         const authError = await requireAuth(event);
         if (authError) return authError;
+
+        const userId   = getUserIdFromToken(event);
+        const { limited, retryAfterSeconds } = checkRateLimit(userId);
+        if (limited) {
+            return {
+                statusCode: 429,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Retry-After": String(retryAfterSeconds),
+                    "X-RateLimit-Limit":  String(RATE_LIMIT_MAX),
+                    "X-RateLimit-Window": String(RATE_LIMIT_WINDOW),
+                },
+                body: JSON.stringify({
+                    error: `Too many search requests. Please wait ${retryAfterSeconds}s before trying again.`,
+                }),
+            };
+        }
 
         try {
             const body = JSON.parse(event.body || "{}");
@@ -202,10 +288,27 @@ export async function handler(event) {
         }
     }
 
-    // ── POST /api/search/industry (auth required) ─────────────────────────────
+    // ── POST /api/search/industry (auth + rate limit required) ───────────────
     if ((path === "/api/search/industry" || path === "/api/search/industry/") && method === "POST") {
         const authError = await requireAuth(event);
         if (authError) return authError;
+
+        const userId   = getUserIdFromToken(event);
+        const { limited, retryAfterSeconds } = checkRateLimit(userId);
+        if (limited) {
+            return {
+                statusCode: 429,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Retry-After": String(retryAfterSeconds),
+                    "X-RateLimit-Limit":  String(RATE_LIMIT_MAX),
+                    "X-RateLimit-Window": String(RATE_LIMIT_WINDOW),
+                },
+                body: JSON.stringify({
+                    error: `Too many search requests. Please wait ${retryAfterSeconds}s before trying again.`,
+                }),
+            };
+        }
 
         try {
             const body = JSON.parse(event.body || "{}");

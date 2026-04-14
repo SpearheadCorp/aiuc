@@ -19,7 +19,7 @@ export function useAISearch() {
     setLoading(true);
     setError(null);
     try {
-      const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+      const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
       const token = await oktaAuth.getAccessToken();
       const response = await fetch(`${base}/api/search`, {
         method: "POST",
@@ -30,6 +30,10 @@ export function useAISearch() {
         body: JSON.stringify({ query }),
       });
       if (!response.ok) {
+        if (response.status === 429) {
+          const retryAfter = response.headers.get("Retry-After") ?? "60";
+          throw new Error(`Too many search requests — please wait ${retryAfter}s before searching again.`);
+        }
         const errData = await response.json().catch(() => ({ error: "Search failed" }));
         throw new Error(errData.error || `Search failed (${response.status})`);
       }
