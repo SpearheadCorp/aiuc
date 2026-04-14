@@ -33,8 +33,8 @@ export async function getEmbedding(text, bedrockClient) {
     try {
         const response = await bedrockClient.send(command);
         const result = JSON.parse(Buffer.from(response.body).toString("utf-8"));
-        if (!Array.isArray(result.embedding)) {
-            throw new Error("Bedrock Titan returned unexpected response shape");
+        if (!result || !Array.isArray(result.embedding)) {
+            throw new Error(`Bedrock Titan returned unexpected response shape: ${JSON.stringify(result)?.slice(0, 200)}`);
         }
         console.log(`[Embedding] success dim=${result.embedding.length}`);
         return result.embedding;

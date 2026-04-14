@@ -56,8 +56,27 @@ function Root() {
             });
     }, []);
 
-    if (error) return <div>{error}</div>;
-    if (!oktaAuth) return null;
+    if (error) return (
+        <div style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            height: "100vh", fontFamily: "sans-serif", padding: "24px",
+        }}>
+            <div style={{ textAlign: "center", maxWidth: 400 }}>
+                <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "#c62828", marginBottom: 12 }}>
+                    Unable to load
+                </div>
+                <div style={{ color: "#555", fontSize: "0.95rem" }}>{error}</div>
+            </div>
+        </div>
+    );
+    if (!oktaAuth) return (
+        <div style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            height: "100vh", fontFamily: "sans-serif", color: "#555",
+        }}>
+            Loading…
+        </div>
+    );
 
     return (
         <BrowserRouter>

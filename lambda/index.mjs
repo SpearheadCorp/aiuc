@@ -141,7 +141,15 @@ export async function handler(event) {
 
     console.log(`[Request] ${method} ${rawPath} → ${path}`);
 
+    // ── GET /health ───────────────────────────────────────────────────────────
+    // Unauthenticated — used by load balancers / uptime monitors.
+    if (path === "/health" || path === "/health/") {
+        return json(200, { status: "ok" });
+    }
+
     // ── GET /api/okta-config ──────────────────────────────────────────────────
+    // Intentionally unauthenticated: the frontend needs the Okta issuer and
+    // clientId to bootstrap the OktaAuth SDK before the user has signed in.
     if (path === "/api/okta-config" || path === "/api/okta-config/") {
         try {
             const clientId = await getOktaClientId();

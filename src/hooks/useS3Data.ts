@@ -25,12 +25,11 @@ export const useS3Data = (): UseS3DataReturn => {
             try {
                 setLoadingUseCase(true);
                 setErrorUseCase(null);
-                const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+                const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
                 const token = await oktaAuth.getAccessToken();
                 const response = await fetch(`${base}/api/data/use-cases`, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                // const response = await fetch("/data/use_cases.json");
                 if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
                 const rawData = await response.json();
                 const useCaseItems: any[] = Array.isArray(rawData) ? rawData : (rawData.data ?? []);
@@ -63,8 +62,7 @@ export const useS3Data = (): UseS3DataReturn => {
             try {
                 setLoadingIndustry(true);
                 setErrorIndustry(null);
-                // const response = await fetch("/data/industry_use_cases.json");
-                const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+                const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
                 const token = await oktaAuth.getAccessToken();
                 const response = await fetch(`${base}/api/data/industry`, {
                     headers: { Authorization: `Bearer ${token}` },

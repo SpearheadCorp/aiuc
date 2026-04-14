@@ -34,7 +34,9 @@ if (existsSync(envPath)) {
     const eqIdx = trimmed.indexOf("=");
     if (eqIdx === -1) continue;
     const key = trimmed.slice(0, eqIdx).trim();
-    const val = trimmed.slice(eqIdx + 1).trim();
+    // Strip surrounding single or double quotes from value
+    const raw = trimmed.slice(eqIdx + 1).trim();
+    const val = raw.replace(/^(['"])(.*)\1$/, "$2");
     if (!process.env[key]) process.env[key] = val;
   }
   console.log("✓ Loaded .env.local");
@@ -42,8 +44,14 @@ if (existsSync(envPath)) {
   console.warn("⚠ .env.local not found — set env vars manually");
 }
 
-const BEDROCK_REGION = process.env.AWS_REGION  || "us-east-2";
-const AWS_PROFILE    = process.env.AWS_PROFILE || "Praveen";
+const BEDROCK_REGION = process.env.AWS_REGION || "us-east-2";
+
+// AWS_PROFILE must be set in .env.local — no hardcoded fallback
+const AWS_PROFILE = process.env.AWS_PROFILE;
+if (!AWS_PROFILE) {
+  console.error("✗ AWS_PROFILE is not set. Add AWS_PROFILE=<your-profile> to .env.local");
+  process.exit(1);
+}
 
 const OKTA_ISSUER    = process.env.VITE_OKTA_ISSUER    || "";
 const OKTA_CLIENT_ID = process.env.VITE_OKTA_CLIENT_ID || "";
@@ -78,10 +86,13 @@ function loadLocalIndex(filePath, itemKey, logPrefix) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+// Restrict CORS to Vite dev server only — not open to all origins
+const ALLOWED_ORIGIN = process.env.DEV_ORIGIN || "http://localhost:5173";
+
 function sendJson(res, status, data) {
   res.writeHead(status, {
     "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
   });
   res.end(JSON.stringify(data));
@@ -102,7 +113,7 @@ createServer(async (req, res) => {
 
   if (method === "OPTIONS") {
     res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Authorization, Content-Type",
     });
