@@ -107,28 +107,26 @@ function App() {
           </Tabs>
         </Box>
 
-        {/* Main Content Area */}
-        <Box sx={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", p: 3 }}>
-          {activeTab === 0 && (
-            <UseCaseTable
-              data={useCaseData}
-              loading={loadingUseCase}
-              error={errorUseCase}
-              userEmail={userEmail}
-              contactEmail={CONTACT_EMAIL}
-              emailTooltipText={EMAIL_TOOLTIP_TEXT}
-            />
-          )}
-          {activeTab === 1 && (
-            <IndustryDataTable
-              data={industryData}
-              loading={loadingIndustry}
-              error={errorIndustry}
-              userEmail={userEmail}
-              contactEmail={CONTACT_EMAIL}
-              emailTooltipText={EMAIL_TOOLTIP_TEXT}
-            />
-          )}
+        {/* Main Content Area — both tabs stay mounted so AI results/filters survive tab switches */}
+        <Box sx={{ flex: 1, overflow: "hidden", flexDirection: "column", p: 3, display: activeTab === 0 ? "flex" : "none" }}>
+          <UseCaseTable
+            data={useCaseData}
+            loading={loadingUseCase}
+            error={errorUseCase}
+            userEmail={userEmail}
+            contactEmail={CONTACT_EMAIL}
+            emailTooltipText={EMAIL_TOOLTIP_TEXT}
+          />
+        </Box>
+        <Box sx={{ flex: 1, overflow: "hidden", display: activeTab === 1 ? "flex" : "none", flexDirection: "column", p: 3 }}>
+          <IndustryDataTable
+            data={industryData}
+            loading={loadingIndustry}
+            error={errorIndustry}
+            userEmail={userEmail}
+            contactEmail={CONTACT_EMAIL}
+            emailTooltipText={EMAIL_TOOLTIP_TEXT}
+          />
         </Box>
 
         {/* Footer */}

@@ -82,9 +82,10 @@ export default function UseCaseTable({
   const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState("");
 
-  // AI search — enabled flag persisted in localStorage so it survives page refresh
+  // AI search — enabled flag persisted per-tab in localStorage so it survives page refresh
+  // Uses a tab-specific key so toggling AI on Tab 1 does not affect Tab 2.
   const [aiEnabled, setAiEnabled] = useState<boolean>(() => {
-    try { return localStorage.getItem("aiuc_ai_search_enabled") !== "false"; }
+    try { return localStorage.getItem("aiuc_ai_search_enabled_usecase") !== "false"; }
     catch { return true; }
   });
   const [aiQuery, setAiQuery] = useState("");
@@ -97,13 +98,16 @@ export default function UseCaseTable({
 
   const handleAISearchToggle = (enabled: boolean) => {
     setAiEnabled(enabled);
-    try { localStorage.setItem("aiuc_ai_search_enabled", String(enabled)); } catch { /* ignore */ }
+    try { localStorage.setItem("aiuc_ai_search_enabled_usecase", String(enabled)); } catch { /* ignore */ }
     if (!enabled) { clearAIResults(); setAiQuery(""); }
     else { setGlobalFilter(""); }
   };
 
   const handleAISearch = () => {
-    if (aiQuery.trim()) doAISearch(aiQuery);
+    if (!aiQuery.trim()) return;
+    // Clear keyword filter so AI results are not silently filtered on switch-back
+    setGlobalFilter("");
+    doAISearch(aiQuery);
   };
 
   const handleClearAISearch = () => {

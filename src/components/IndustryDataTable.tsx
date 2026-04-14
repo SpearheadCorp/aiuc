@@ -83,9 +83,10 @@ export default function IndustryDataTable({
   const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState("");
 
-  // AI search — enabled flag persisted in localStorage so it survives page refresh
+  // AI search — enabled flag persisted per-tab in localStorage so it survives page refresh
+  // Uses a tab-specific key so toggling AI on Tab 2 does not affect Tab 1.
   const [aiEnabled, setAiEnabled] = useState<boolean>(() => {
-    try { return localStorage.getItem("aiuc_ai_search_enabled") !== "false"; }
+    try { return localStorage.getItem("aiuc_ai_search_enabled_industry") !== "false"; }
     catch { return true; }
   });
   const [aiQuery, setAiQuery] = useState("");
@@ -98,13 +99,16 @@ export default function IndustryDataTable({
 
   const handleAISearchToggle = (enabled: boolean) => {
     setAiEnabled(enabled);
-    try { localStorage.setItem("aiuc_ai_search_enabled", String(enabled)); } catch { /* ignore */ }
+    try { localStorage.setItem("aiuc_ai_search_enabled_industry", String(enabled)); } catch { /* ignore */ }
     if (!enabled) { clearAIResults(); setAiQuery(""); }
     else { setGlobalFilter(""); }
   };
 
   const handleAISearch = () => {
-    if (aiQuery.trim()) doAISearch(aiQuery);
+    if (!aiQuery.trim()) return;
+    // Clear keyword filter so AI results are not silently filtered on switch-back
+    setGlobalFilter("");
+    doAISearch(aiQuery);
   };
 
   const handleClearAISearch = () => {
