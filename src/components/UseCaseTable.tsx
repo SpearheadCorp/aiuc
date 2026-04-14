@@ -52,6 +52,30 @@ import { useLogger } from "../hooks/useLogger";
 import { useColumnsConfig } from "../hooks/useColumnsConfig";
 import { APP_CONFIG } from "../config/appConfig";
 import LockIcon from "@mui/icons-material/Lock";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import { useSearchApi } from "../hooks/useSearchApi";
+import type { UseCaseSearchResult, UseCaseRaw } from "../types";
+
+/** Extend UseCaseData with an optional "Why Matched" explanation for search results. */
+type UseCaseRow = UseCaseData & { _whyMatched?: string };
+
+/** Map a raw snake_case use-case object from the search API to the display shape. */
+function mapUseCaseRaw(raw: UseCaseRaw, idx: number): UseCaseRow {
+    return {
+        id: Number(raw.capability ?? idx),
+        Capability: Number(raw.capability ?? idx),
+        "Business Function": raw.business_function ?? "",
+        "Business Capability": raw.business_capability ?? "",
+        "Stakeholder or User": raw.stakeholder_or_user ?? "",
+        "AI Use Case": raw.ai_use_case ?? "",
+        "AI Algorithms & Frameworks": raw.ai_algorithms_frameworks ?? "",
+        Datasets: raw.datasets ?? "",
+        "Action / Implementation": raw.action_implementation ?? "",
+        "AI Tools & Models": raw.ai_tools_models ?? "",
+        "Digital Platforms and Tools": raw.digital_platforms_and_tools ?? "",
+        "Expected Outcomes and Results": raw.expected_outcomes_and_results ?? "",
+    };
+}
 
 const PURE_ORANGE = "#2D89EF";
 
@@ -131,6 +155,37 @@ export default function UseCaseTable({
     element: HTMLElement;
     field: string;
   } | null>(null);
+
+  // NL search state
+  const [nlQuery, setNlQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<UseCaseSearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const { searchUseCases } = useSearchApi();
+
+  const searchMode = searchResults.length > 0;
+
+  const handleNLSearch = async () => {
+    const q = nlQuery.trim();
+    if (!q) return;
+    setIsSearching(true);
+    setSearchError(null);
+    try {
+      const results = await searchUseCases(q, 15);
+      setSearchResults(results);
+      logSearch(q);
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : "Search failed");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleClearSearch = () => {
+    setNlQuery("");
+    setSearchResults([]);
+    setSearchError(null);
+  };
 
   const { logSearch, logClick, logColumnClick, logRowClick, logFilter } = useLogger();
   const isAuthenticated = isRegistered;
@@ -277,6 +332,17 @@ export default function UseCaseTable({
     return result;
   }, [data, filters, globalFilter]);
 
+  /** Data shown in the table: search results in search mode, full filtered set otherwise. */
+  const tableData = useMemo<UseCaseRow[]>(() => {
+    if (searchMode) {
+      return searchResults.map((r, i) => ({
+        ...mapUseCaseRaw(r.useCase, i),
+        _whyMatched: r.whyMatched,
+      }));
+    }
+    return filteredData as UseCaseRow[];
+  }, [searchMode, searchResults, filteredData]);
+
   // Get unique values for filtering - FACETED SEARCH (uses filteredData)
   const getUniqueValues = useCallback(
     (field: string): string[] => {
@@ -298,7 +364,7 @@ export default function UseCaseTable({
 
   // Custom Header
   const CustomHeader = useCallback(
-    ({ column }: { column: Column<UseCaseData, any> }) => {
+    ({ column }: { column: Column<UseCaseRow, any> }) => {
       const field = column.id;
       const headerName = column.columnDef.meta?.headerName || field;
       const filter = filters[field] || {
@@ -385,8 +451,28 @@ export default function UseCaseTable({
     logClick("contact_button", { aiUseCase });
   }, [logClick]);
 
-  const columns = useMemo<ColumnDef<UseCaseData>[]>(
+  const columns = useMemo<ColumnDef<UseCaseRow>[]>(
     () => [
+      // "Why Matched" column — only shown in AI search results mode
+      ...(searchMode ? [{
+        id: "_whyMatched",
+        accessorKey: "_whyMatched" as keyof UseCaseRow,
+        header: () => (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+            <AutoAwesomeIcon sx={{ fontSize: 14, color: PURE_ORANGE }} />
+            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>
+              Why Matched
+            </Typography>
+          </Box>
+        ),
+        size: 280,
+        enableSorting: false,
+        cell: ({ row }: { row: any }) => (
+          <Box sx={{ py: 1, fontSize: "0.78rem", color: "#444", fontStyle: "italic", lineHeight: 1.5, whiteSpace: "normal" }}>
+            {row.original._whyMatched || ""}
+          </Box>
+        ),
+      } as ColumnDef<UseCaseRow>] : []),
       {
         id: "contact",
         header: () => null,
@@ -751,11 +837,11 @@ export default function UseCaseTable({
         },
       },
     ],
-    [expandedRows, CustomHeader, renderChips, toggleRowExpansion, handleContactClick]
+    [searchMode, expandedRows, CustomHeader, renderChips, toggleRowExpansion, handleContactClick]
   );
 
-  const table = useReactTable({
-    data: filteredData,
+  const table = useReactTable<UseCaseRow>({
+    data: tableData,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -790,7 +876,7 @@ export default function UseCaseTable({
 
   // Total Column Width
   const totalWidth = useMemo(() => {
-    return columns.reduce((sum: number, col: ColumnDef<UseCaseData, any>) => sum + (col.size || 150), 0);
+    return columns.reduce((sum: number, col: ColumnDef<UseCaseRow, any>) => sum + (col.size || 150), 0);
   }, [columns]);
 
   const hasActiveFilters = useMemo(() => {
@@ -818,6 +904,83 @@ export default function UseCaseTable({
         height: "100%",
       }}
     >
+      {/* AI Natural Language Search */}
+      <Box sx={{ mb: 2 }}>
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Describe what you're looking for… e.g. 'reduce customer churn using predictive analytics'"
+            value={nlQuery}
+            onChange={(e) => setNlQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleNLSearch(); }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <AutoAwesomeIcon fontSize="small" sx={{ color: PURE_ORANGE }} />
+                </InputAdornment>
+              ),
+              endAdornment: nlQuery && (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={handleClearSearch} sx={{ padding: "4px" }}>
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+            sx={{
+              "& .MuiOutlinedInput-root": {
+                "&.Mui-focused fieldset": { borderColor: PURE_ORANGE },
+              },
+            }}
+          />
+          <Button
+            variant="contained"
+            size="small"
+            onClick={handleNLSearch}
+            disabled={isSearching || !nlQuery.trim()}
+            sx={{
+              backgroundColor: PURE_ORANGE,
+              color: "#fff",
+              textTransform: "none",
+              whiteSpace: "nowrap",
+              boxShadow: "none",
+              "&:hover": { backgroundColor: "#1a6bbf", boxShadow: "none" },
+              "&.Mui-disabled": { backgroundColor: "#ccc" },
+            }}
+          >
+            {isSearching ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : "AI Search"}
+          </Button>
+          {searchMode && (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleClearSearch}
+              sx={{
+                color: PURE_ORANGE,
+                borderColor: PURE_ORANGE,
+                textTransform: "none",
+                whiteSpace: "nowrap",
+                "&:hover": { borderColor: "#1a6bbf" },
+              }}
+            >
+              Show All
+            </Button>
+          )}
+        </Box>
+        {searchError && (
+          <Typography variant="body2" sx={{ color: "#c62828", mt: 0.5, fontSize: "0.8rem" }}>
+            {searchError}
+          </Typography>
+        )}
+        {searchMode && (
+          <Typography variant="body2" sx={{ color: PURE_ORANGE, mt: 0.5, fontSize: "0.8rem", display: "flex", alignItems: "center", gap: 0.5 }}>
+            <AutoAwesomeIcon sx={{ fontSize: 12 }} />
+            Showing {searchResults.length} AI-matched results for "{nlQuery}"
+          </Typography>
+        )}
+      </Box>
+
       <Box
         sx={{
           display: "flex",
@@ -863,9 +1026,11 @@ export default function UseCaseTable({
           variant="body2"
           sx={{ color: "#666", fontSize: "0.8rem", fontWeight: 500, whiteSpace: "nowrap" }}
         >
-          {filteredData.length === data.length
-            ? `${data.length} use cases`
-            : `${filteredData.length} of ${data.length} use cases`}
+          {searchMode
+            ? `${searchResults.length} results`
+            : filteredData.length === data.length
+              ? `${data.length} use cases`
+              : `${filteredData.length} of ${data.length} use cases`}
         </Typography>
 
         <Box sx={{ flex: 1 }} />

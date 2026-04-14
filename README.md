@@ -39,6 +39,85 @@ An internal web application for exploring, searching, and sharing AI use cases a
 
 ---
 
+## AI Search (RAG)
+
+The app includes a semantic RAG search powered by Amazon Bedrock, controlled via the `ENABLE_AI_SEARCH` Lambda environment variable.
+
+### Enabling / Disabling AI Search
+
+Set the variable in **AWS Lambda Console → Configuration → Environment variables**:
+
+```
+ENABLE_AI_SEARCH=true    # semantic vector search (default)
+ENABLE_AI_SEARCH=false   # keyword-only fallback (no Bedrock calls)
+```
+
+No redeployment required — the Lambda reads the flag at cold-start.
+
+### How It Works
+
+1. User types a natural-language query in the **AI Search** input and presses **AI Search** (or Enter).
+2. The frontend POSTs `{ query, limit }` to `/api/search` (Case Study) or `/api/search/industry` (Industry Data).
+3. Lambda embeds the query using **`amazon.titan-embed-text-v2:0`** (1024-dim).
+4. A pure-JS cosine similarity index ranks pre-computed embeddings loaded from S3.
+5. **`us.amazon.nova-lite-v1:0`** generates a 1–2 sentence "Why Matched" explanation per result.
+6. Results appear in the table with the **Why Matched** column visible.
+
+Clicking **Show All** clears results and returns to the full browseable dataset.
+
+### Required IAM Permissions
+
+Add to the Lambda execution role:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["bedrock:InvokeModel"],
+  "Resource": [
+    "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
+    "arn:aws:bedrock:*::foundation-model/us.amazon.nova-lite-v1:0"
+  ]
+}
+```
+
+### S3 Embeddings Setup
+
+1. **Upload dataset** to `s3://<BUCKET_NAME>/use_cases.json` and `s3://<BUCKET_NAME>/industry_use_cases.json` (arrays of snake_case objects).
+
+2. **Generate embeddings** (calls Bedrock Titan — requires `bedrock:InvokeModel`):
+   ```bash
+   cd lambda && node scripts/generate-embeddings.mjs
+   ```
+   Produces `public/data/use_cases_embeddings.json` and `public/data/industry_use_cases_embeddings.json`.
+
+3. **Upload embeddings to S3**:
+   ```bash
+   aws s3 cp public/data/use_cases_embeddings.json s3://<BUCKET_NAME>/use_cases_embeddings.json
+   aws s3 cp public/data/industry_use_cases_embeddings.json s3://<BUCKET_NAME>/industry_use_cases_embeddings.json
+   ```
+
+Override S3 key paths via Lambda env vars if needed:
+```
+USE_CASES_EMBEDDINGS_KEY=path/to/use_cases_embeddings.json
+INDUSTRY_EMBEDDINGS_KEY=path/to/industry_use_cases_embeddings.json
+```
+
+The Lambda caches the loaded index in memory across warm invocations.
+
+### Shared Core Module
+
+All RAG logic lives in `lambda/core/` — shared across all deployments:
+
+| File | Purpose |
+|------|---------|
+| `core/embeddings.mjs` | Bedrock Titan Text Embeddings v2 (1024-dim) |
+| `core/search.mjs` | FlatIP index, vector search, keyword fallback |
+| `core/ai_toggle.mjs` | `ENABLE_AI_SEARCH` feature flag |
+| `core/why_matched.mjs` | Bedrock Nova Lite "Why Matched" explanations |
+| `core/api_handlers.mjs` | `handleUseCaseSearch` / `handleIndustrySearch` |
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -465,6 +544,8 @@ All routes are served by `lambda/index.mjs` (production) or `lambda/server.mjs` 
 | `GET` | `/api/reject` | Token param | Admin rejection: sends user a rejection email via SES |
 | `POST` | `/api/contact` | None | Sends contact form email via SES to `CONTACT_EMAIL` |
 | `POST` | `/api/log` | None | Writes analytics event to S3 (always returns 200) |
+| `POST` | `/api/search` | Optional JWT | RAG use-case search — `{query, limit}` → `{results: [{useCase, score, whyMatched}]}` |
+| `POST` | `/api/search/industry` | Optional JWT | RAG industry search — `{query, limit}` → `{results: [{item, score, whyMatched}]}` |
 
 ---
 

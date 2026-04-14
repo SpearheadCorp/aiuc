@@ -53,6 +53,33 @@ import { useLogger } from "../hooks/useLogger";
 import { useColumnsConfig } from "../hooks/useColumnsConfig";
 import { APP_CONFIG } from "../config/appConfig";
 import LockIcon from "@mui/icons-material/Lock";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import { useSearchApi } from "../hooks/useSearchApi";
+import type { IndustrySearchResult, IndustryRaw } from "../types";
+
+/** Extend IndustryData with an optional "Why Matched" explanation for search results. */
+type IndustryRow = IndustryData & { _whyMatched?: string };
+
+/** Map a raw snake_case industry item from the search API to the display shape. */
+function mapIndustryRaw(raw: IndustryRaw): IndustryRow {
+    return {
+        Id: String(raw.id ?? ""),
+        Industry: raw.industry ?? "",
+        "Business Function": raw.business_function ?? "",
+        "Business Capability": raw.business_capability ?? "",
+        "Stakeholders / Users": raw.stakeholders_users ?? "",
+        "AI Use Case": raw.ai_use_case ?? "",
+        Description: raw.description ?? "",
+        "Implementation Plan": raw.implementation_plan ?? "",
+        "Expected Outcomes": raw.expected_outcomes ?? "",
+        Datasets: raw.datasets ?? "",
+        "AI Tools / Platforms": raw.ai_tools_platforms ?? "",
+        "Digital Tools / Platforms": raw.digital_tools_platforms ?? "",
+        "AI Frameworks": raw.ai_frameworks ?? "",
+        "AI Tools and Models": raw.ai_tools_and_models ?? "",
+        "Industry References": raw.industry_references ?? "",
+    };
+}
 
 const PURE_ORANGE = "#2D89EF";
 
@@ -133,6 +160,37 @@ export default function IndustryDataTable({
     element: HTMLElement;
     field: string;
   } | null>(null);
+
+  // NL search state
+  const [nlQuery, setNlQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<IndustrySearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const { searchIndustry } = useSearchApi();
+
+  const searchMode = searchResults.length > 0;
+
+  const handleNLSearch = async () => {
+    const q = nlQuery.trim();
+    if (!q) return;
+    setIsSearching(true);
+    setSearchError(null);
+    try {
+      const results = await searchIndustry(q, 15);
+      setSearchResults(results);
+      logSearch(q);
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : "Search failed");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleClearSearch = () => {
+    setNlQuery("");
+    setSearchResults([]);
+    setSearchError(null);
+  };
 
   const { logSearch, logClick, logColumnClick, logRowClick, logFilter } = useLogger();
   const isAuthenticated = isRegistered;
@@ -267,6 +325,17 @@ export default function IndustryDataTable({
     return result;
   }, [data, filters, globalFilter]);
 
+  /** Data shown in the table: search results in search mode, full filtered set otherwise. */
+  const tableData = useMemo<IndustryRow[]>(() => {
+    if (searchMode) {
+      return searchResults.map((r) => ({
+        ...mapIndustryRaw(r.item),
+        _whyMatched: r.whyMatched,
+      }));
+    }
+    return filteredData as IndustryRow[];
+  }, [searchMode, searchResults, filteredData]);
+
   // Unique values for filter - FACETED SEARCH (uses filteredData)
   const getUniqueValues = useCallback(
     (field: string): string[] => {
@@ -288,7 +357,7 @@ export default function IndustryDataTable({
 
   // Custom Header
   const CustomHeader = useCallback(
-    ({ column }: { column: Column<IndustryData, any> }) => {
+    ({ column }: { column: Column<IndustryRow, any> }) => {
       const field = column.id;
       const headerName = column.columnDef.meta?.headerName || field;
       const filter = filters[field] || {
@@ -375,8 +444,28 @@ export default function IndustryDataTable({
     logClick("contact_button", { aiUseCase, industry });
   }, [logClick]);
 
-  const columns = useMemo<ColumnDef<IndustryData>[]>(
+  const columns = useMemo<ColumnDef<IndustryRow>[]>(
     () => [
+      // "Why Matched" column — only shown in AI search results mode
+      ...(searchMode ? [{
+        id: "_whyMatched",
+        accessorKey: "_whyMatched" as keyof IndustryRow,
+        header: () => (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+            <AutoAwesomeIcon sx={{ fontSize: 14, color: PURE_ORANGE }} />
+            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>
+              Why Matched
+            </Typography>
+          </Box>
+        ),
+        size: 280,
+        enableSorting: false,
+        cell: ({ row }: { row: any }) => (
+          <Box sx={{ py: 1, fontSize: "0.78rem", color: "#444", fontStyle: "italic", lineHeight: 1.5, whiteSpace: "normal" }}>
+            {row.original._whyMatched || ""}
+          </Box>
+        ),
+      } as ColumnDef<IndustryRow>] : []),
       {
         id: "contact",
         header: () => null,
@@ -799,11 +888,11 @@ export default function IndustryDataTable({
         },
       },
     ],
-    [expandedRows, CustomHeader, renderChips, toggleRowExpansion, filters, handleContactClick, logRowClick]
+    [searchMode, expandedRows, CustomHeader, renderChips, toggleRowExpansion, filters, handleContactClick, logRowClick]
   );
 
-  const table = useReactTable({
-    data: filteredData,
+  const table = useReactTable<IndustryRow>({
+    data: tableData,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -837,7 +926,7 @@ export default function IndustryDataTable({
   }, [expandedRows, rowVirtualizer]);
 
   const totalWidth = useMemo(() => {
-    return columns.reduce((sum: number, col: ColumnDef<IndustryData, any>) => sum + (col.size || 150), 0);
+    return columns.reduce((sum: number, col: ColumnDef<IndustryRow, any>) => sum + (col.size || 150), 0);
   }, [columns]);
 
   const hasActiveFilters = useMemo(() => {
@@ -865,6 +954,83 @@ export default function IndustryDataTable({
         height: "100%",
       }}
     >
+      {/* AI Natural Language Search */}
+      <Box sx={{ mb: 2 }}>
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Describe what you're looking for… e.g. 'AI use cases for healthcare supply chain optimization'"
+            value={nlQuery}
+            onChange={(e) => setNlQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleNLSearch(); }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <AutoAwesomeIcon fontSize="small" sx={{ color: PURE_ORANGE }} />
+                </InputAdornment>
+              ),
+              endAdornment: nlQuery && (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={handleClearSearch} sx={{ padding: "4px" }}>
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+            sx={{
+              "& .MuiOutlinedInput-root": {
+                "&.Mui-focused fieldset": { borderColor: PURE_ORANGE },
+              },
+            }}
+          />
+          <Button
+            variant="contained"
+            size="small"
+            onClick={handleNLSearch}
+            disabled={isSearching || !nlQuery.trim()}
+            sx={{
+              backgroundColor: PURE_ORANGE,
+              color: "#fff",
+              textTransform: "none",
+              whiteSpace: "nowrap",
+              boxShadow: "none",
+              "&:hover": { backgroundColor: "#1a6bbf", boxShadow: "none" },
+              "&.Mui-disabled": { backgroundColor: "#ccc" },
+            }}
+          >
+            {isSearching ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : "AI Search"}
+          </Button>
+          {searchMode && (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleClearSearch}
+              sx={{
+                color: PURE_ORANGE,
+                borderColor: PURE_ORANGE,
+                textTransform: "none",
+                whiteSpace: "nowrap",
+                "&:hover": { borderColor: "#1a6bbf" },
+              }}
+            >
+              Show All
+            </Button>
+          )}
+        </Box>
+        {searchError && (
+          <Typography variant="body2" sx={{ color: "#c62828", mt: 0.5, fontSize: "0.8rem" }}>
+            {searchError}
+          </Typography>
+        )}
+        {searchMode && (
+          <Typography variant="body2" sx={{ color: PURE_ORANGE, mt: 0.5, fontSize: "0.8rem", display: "flex", alignItems: "center", gap: 0.5 }}>
+            <AutoAwesomeIcon sx={{ fontSize: 12 }} />
+            Showing {searchResults.length} AI-matched results for "{nlQuery}"
+          </Typography>
+        )}
+      </Box>
+
       <Box
         sx={{
           display: "flex",
@@ -910,9 +1076,11 @@ export default function IndustryDataTable({
           variant="body2"
           sx={{ color: "#666", fontSize: "0.8rem", fontWeight: 500, whiteSpace: "nowrap" }}
         >
-          {filteredData.length === data.length
-            ? `${data.length} use cases`
-            : `${filteredData.length} of ${data.length} use cases`}
+          {searchMode
+            ? `${searchResults.length} results`
+            : filteredData.length === data.length
+              ? `${data.length} industry items`
+              : `${filteredData.length} of ${data.length} industry items`}
         </Typography>
 
         <Box sx={{ flex: 1 }} />

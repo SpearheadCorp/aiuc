@@ -3,11 +3,19 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3
 import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
+import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { CognitoJwtVerifier } from "aws-jwt-verify";
+import { handleUseCaseSearch, handleIndustrySearch } from "./core/api_handlers.mjs";
 
-const s3 = new S3Client({ region: process.env.S3_REGION });
-const secretsManager = new SecretsManagerClient({ region: process.env.S3_REGION || process.env.AWS_REGION });
+const REGION = process.env.S3_REGION || process.env.AWS_REGION || "us-east-1";
+const s3 = new S3Client({ region: REGION });
+const secretsManager = new SecretsManagerClient({ region: REGION });
 const sts = new STSClient({ region: "us-west-2" });
+const bedrockRuntime = new BedrockRuntimeClient({ region: REGION });
+
+// S3 keys for pre-computed embeddings (override via Lambda env vars)
+const USE_CASES_EMBEDDINGS_KEY = process.env.USE_CASES_EMBEDDINGS_KEY || "use_cases_embeddings.json";
+const INDUSTRY_EMBEDDINGS_KEY = process.env.INDUSTRY_EMBEDDINGS_KEY || "industry_use_cases_embeddings.json";
 const SES_CROSS_ACCOUNT_ROLE = process.env.SES_CROSS_ACCOUNT_ROLE_ARN;
 const BUCKET = process.env.BUCKET_NAME;
 const DIST_PREFIX = process.env.DIST_PREFIX;
@@ -633,6 +641,51 @@ export async function handler(event) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ ok: false }),
             };
+        }
+    }
+
+    // --- RAG search routes ---
+    if ((path === "/api/search" || path === "/api/search/") && method === "POST") {
+        try {
+            const body = JSON.parse(event.body || "{}");
+            const { query, limit } = body;
+            if (!query || typeof query !== "string" || !query.trim()) {
+                return { statusCode: 400, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Missing required field: query" }) };
+            }
+            const result = await handleUseCaseSearch({
+                query,
+                limit,
+                s3Client: s3,
+                bucket: BUCKET,
+                embeddingsKey: USE_CASES_EMBEDDINGS_KEY,
+                bedrockClient: bedrockRuntime,
+            });
+            return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) };
+        } catch (err) {
+            console.error("[search] error:", err.message);
+            return { statusCode: 500, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Search failed" }) };
+        }
+    }
+
+    if ((path === "/api/search/industry" || path === "/api/search/industry/") && method === "POST") {
+        try {
+            const body = JSON.parse(event.body || "{}");
+            const { query, limit } = body;
+            if (!query || typeof query !== "string" || !query.trim()) {
+                return { statusCode: 400, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Missing required field: query" }) };
+            }
+            const result = await handleIndustrySearch({
+                query,
+                limit,
+                s3Client: s3,
+                bucket: BUCKET,
+                industryEmbeddingsKey: INDUSTRY_EMBEDDINGS_KEY,
+                bedrockClient: bedrockRuntime,
+            });
+            return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) };
+        } catch (err) {
+            console.error("[search/industry] error:", err.message);
+            return { statusCode: 500, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Industry search failed" }) };
         }
     }
 
