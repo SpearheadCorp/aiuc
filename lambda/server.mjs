@@ -9,14 +9,35 @@
 import http from "http";
 import { createHmac, timingSafeEqual } from "crypto";
 import { readFileSync } from "fs";
+import { readFile } from "fs/promises";
 import { fileURLToPath } from "url";
 import path from "path";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
+import { handleUseCaseSearch, handleIndustrySearch } from "./core/api_handlers.mjs";
 
 // ---------------------------------------------------------------------------
 // Load lambda/.env (if it exists) into process.env
 // ---------------------------------------------------------------------------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = path.join(__dirname, "..", "public", "data");
+
+// Local S3 adapter — reads embeddings/data files from public/data/ instead of S3
+const localS3 = {
+  send(command) {
+    const key = command.input?.Key || "";
+    const filename = path.basename(key);
+    const filePath = path.join(DATA_DIR, filename);
+    return readFile(filePath, "utf8").then((content) => ({
+      Body: { transformToString: () => Promise.resolve(content) },
+    }));
+  },
+};
+
+const bedrockClient = new BedrockRuntimeClient({
+  region: process.env.AWS_REGION || "us-east-1",
+});
+
 // Read from root .env (one level up from lambda/)
 const envPath = path.join(__dirname, "..", ".env");
 try {
@@ -127,7 +148,7 @@ function send(res, status, payload) {
 const server = http.createServer(async (req, res) => {
   // CORS headers so Vite dev server can reach us
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -292,6 +313,50 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url === "/api/log") {
     await readBody(req).catch(() => { });
     return send(res, 200, { ok: true });
+  }
+
+  // POST /api/search — use-case AI search (reads from public/data/ locally)
+  if (req.method === "POST" && url === "/api/search") {
+    try {
+      const { query, limit } = await readBody(req);
+      if (!query || typeof query !== "string" || !query.trim()) {
+        return send(res, 400, { error: "Missing required field: query" });
+      }
+      const result = await handleUseCaseSearch({
+        query,
+        limit,
+        s3Client: localS3,
+        bucket: "local",
+        embeddingsKey: "use_cases_embeddings.json",
+        bedrockClient,
+      });
+      return send(res, 200, result);
+    } catch (err) {
+      console.error("[search] error:", err.message);
+      return send(res, 500, { error: "Search failed" });
+    }
+  }
+
+  // POST /api/search/industry — industry AI search (reads from public/data/ locally)
+  if (req.method === "POST" && url === "/api/search/industry") {
+    try {
+      const { query, limit } = await readBody(req);
+      if (!query || typeof query !== "string" || !query.trim()) {
+        return send(res, 400, { error: "Missing required field: query" });
+      }
+      const result = await handleIndustrySearch({
+        query,
+        limit,
+        s3Client: localS3,
+        bucket: "local",
+        industryEmbeddingsKey: "industry_use_cases_embeddings.json",
+        bedrockClient,
+      });
+      return send(res, 200, result);
+    } catch (err) {
+      console.error("[search/industry] error:", err.message);
+      return send(res, 500, { error: "Industry search failed" });
+    }
   }
 
   send(res, 404, { error: "Not found" });

@@ -1,4 +1,4 @@
-import { createHmac, createHash, timingSafeEqual } from "crypto";
+import { createHmac, createHash, timingSafeEqual, randomUUID } from "crypto";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
@@ -92,12 +92,20 @@ function stripRestrictedColumns(rows, restrictedNames, columnKeyMap) {
     });
 }
 
+// Cache STS credentials — reuse until 5 minutes before expiry
+let _sesClientCache = null;
+let _sesCredentialsExpiry = 0;
+
 async function getSESClient() {
+    const now = Date.now();
+    if (_sesClientCache && now < _sesCredentialsExpiry) return _sesClientCache;
+
     const assumed = await sts.send(new AssumeRoleCommand({
         RoleArn: SES_CROSS_ACCOUNT_ROLE,
         RoleSessionName: "aiuc-ses-send",
     }));
-    return new SESClient({
+    _sesCredentialsExpiry = new Date(assumed.Credentials.Expiration).getTime() - 5 * 60 * 1000;
+    _sesClientCache = new SESClient({
         region: "us-west-2",
         credentials: {
             accessKeyId: assumed.Credentials.AccessKeyId,
@@ -105,6 +113,7 @@ async function getSESClient() {
             sessionToken: assumed.Credentials.SessionToken,
         },
     });
+    return _sesClientCache;
 }
 
 async function sendEmail({ to, subject, text, replyTo }) {
@@ -607,7 +616,7 @@ export async function handler(event) {
                 };
             }
 
-            const eventId = crypto.randomUUID();
+            const eventId = randomUUID();
             const ts = timestamp || new Date().toISOString();
             const date = ts.slice(0, 10); // YYYY-MM-DD
 

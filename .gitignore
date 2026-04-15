@@ -40,4 +40,20 @@ backup_nextjs/
 out/
 build/
 dist1/
-lambda.zip
+lambda.zip
+
+# Session/context dump files
+2026-*.txt
+2025-*.txt
+
+# Local data & eval directories
+data/
+eval/
+
+# Images
+*.png
+*.jpg
+*.jpeg
+
+# Precomputed embeddings (large, generated files)
+public/data/*_embeddings.json

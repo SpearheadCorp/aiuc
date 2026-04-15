@@ -1,621 +1,713 @@
 # AI Use Case Repository (AIUC)
 
-An internal web application for exploring, searching, and sharing AI use cases across business functions and industries. Built for the Spearhead AI event, it features Cognito-based authentication, role-based data access, an admin approval workflow, and full analytics logging.
+A secure, AI-powered internal tool built by **Spearhead** that lets enterprise employees discover, search, and explore AI use cases curated for their organisation. It serves two curated datasets — **Case Studies** and **Industry Data** — with role-based column visibility, semantic vector search powered by Amazon Bedrock, and a managed registration/approval workflow.
+
+> **Confidential — Internal Use Only**
 
 ---
 
 ## Table of Contents
 
-- [Features](#features)
+- [Key Features](#key-features)
 - [Tech Stack](#tech-stack)
+- [How It Works](#how-it-works)
 - [Architecture](#architecture)
-- [Project Structure](#project-structure)
-- [Prerequisites](#prerequisites)
-- [Local Development Setup](#local-development-setup)
+- [Directory Structure](#directory-structure)
+- [Local Development](#local-development)
 - [Environment Variables](#environment-variables)
-- [Available Scripts](#available-scripts)
-- [Authentication & Authorization](#authentication--authorization)
-- [Column-Level Access Control](#column-level-access-control)
+- [Building for Production](#building-for-production)
+- [Lambda Deployment](#lambda-deployment)
+- [AI Search — Bedrock Model Evaluation](#ai-search--bedrock-model-evaluation)
 - [Admin Approval Workflow](#admin-approval-workflow)
-- [Analytics & Usage Logs](#analytics--usage-logs)
+- [Column Access Control](#column-access-control)
+- [Usage Logging](#usage-logging)
 - [API Reference](#api-reference)
-- [Deployment to AWS](#deployment-to-aws)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## Features
+## Key Features
 
-- **Two data views** — "Case Study" table and "Industry Data" table with virtualized scrolling for large datasets
-- **Search & filter** — full-text search and per-column filtering on all data
-- **Cognito authentication** — email/password registration, login, and forgot-password flow
-- **Role-based data access** — unauthenticated users see blurred restricted columns; authenticated users see all data
-- **Server-side data filtering** — restricted columns are stripped in the Lambda response for unauthenticated requests (JWT verified via `aws-jwt-verify`)
-- **Admin approval workflow** — non-work-email registrations trigger an admin review email with one-click Approve/Reject links (HMAC-signed, 7-day expiry, replay-protected)
-- **Contact form** — users can email the team from within the app (sent via AWS SES)
-- **Configurable column restrictions** — restricted columns controlled via Lambda environment variables (no code deployment needed)
-- **Usage analytics** — every user interaction (search, click, filter, row view) logged to S3 with session tracking
-- **Spearhead branding** — header/footer logos link to spearhead.so
-
----
-
-## AI Search (RAG)
-
-The app includes a semantic RAG search powered by Amazon Bedrock, controlled via the `ENABLE_AI_SEARCH` Lambda environment variable.
-
-### Enabling / Disabling AI Search
-
-Set the variable in **AWS Lambda Console → Configuration → Environment variables**:
-
-```
-ENABLE_AI_SEARCH=true    # semantic vector search (default)
-ENABLE_AI_SEARCH=false   # keyword-only fallback (no Bedrock calls)
-```
-
-No redeployment required — the Lambda reads the flag at cold-start.
-
-### How It Works
-
-1. User types a natural-language query in the **AI Search** input and presses **AI Search** (or Enter).
-2. The frontend POSTs `{ query, limit }` to `/api/search` (Case Study) or `/api/search/industry` (Industry Data).
-3. Lambda embeds the query using **`amazon.titan-embed-text-v2:0`** (1024-dim).
-4. A pure-JS cosine similarity index ranks pre-computed embeddings loaded from S3.
-5. **`us.amazon.nova-lite-v1:0`** generates a 1–2 sentence "Why Matched" explanation per result.
-6. Results appear in the table with the **Why Matched** column visible.
-
-Clicking **Show All** clears results and returns to the full browseable dataset.
-
-### Required IAM Permissions
-
-Add to the Lambda execution role:
-
-```json
-{
-  "Effect": "Allow",
-  "Action": ["bedrock:InvokeModel"],
-  "Resource": [
-    "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
-    "arn:aws:bedrock:*::foundation-model/us.amazon.nova-lite-v1:0"
-  ]
-}
-```
-
-### S3 Embeddings Setup
-
-1. **Upload dataset** to `s3://<BUCKET_NAME>/use_cases.json` and `s3://<BUCKET_NAME>/industry_use_cases.json` (arrays of snake_case objects).
-
-2. **Generate embeddings** (calls Bedrock Titan — requires `bedrock:InvokeModel`):
-   ```bash
-   cd lambda && node scripts/generate-embeddings.mjs
-   ```
-   Produces `public/data/use_cases_embeddings.json` and `public/data/industry_use_cases_embeddings.json`.
-
-3. **Upload embeddings to S3**:
-   ```bash
-   aws s3 cp public/data/use_cases_embeddings.json s3://<BUCKET_NAME>/use_cases_embeddings.json
-   aws s3 cp public/data/industry_use_cases_embeddings.json s3://<BUCKET_NAME>/industry_use_cases_embeddings.json
-   ```
-
-Override S3 key paths via Lambda env vars if needed:
-```
-USE_CASES_EMBEDDINGS_KEY=path/to/use_cases_embeddings.json
-INDUSTRY_EMBEDDINGS_KEY=path/to/industry_use_cases_embeddings.json
-```
-
-The Lambda caches the loaded index in memory across warm invocations.
-
-### Shared Core Module
-
-All RAG logic lives in `lambda/core/` — shared across all deployments:
-
-| File | Purpose |
-|------|---------|
-| `core/embeddings.mjs` | Bedrock Titan Text Embeddings v2 (1024-dim) |
-| `core/search.mjs` | FlatIP index, vector search, keyword fallback |
-| `core/ai_toggle.mjs` | `ENABLE_AI_SEARCH` feature flag |
-| `core/why_matched.mjs` | Bedrock Nova Lite "Why Matched" explanations |
-| `core/api_handlers.mjs` | `handleUseCaseSearch` / `handleIndustrySearch` |
+| Feature | Description |
+|---------|-------------|
+| **Two data views** | Case Study table (AI use cases) + Industry Data table — each with independent filters, sorting, and AI search |
+| **Semantic AI search** | Vector search via Amazon Bedrock Titan Text Embeddings v2 (1024-dim); falls back to keyword search when AI is toggled off or Bedrock is unavailable |
+| **"Why Matched" explanations** | Per-result natural-language explanation of why a use case matched the query, generated by Bedrock Nova Lite |
+| **Column-level access control** | Unauthenticated users see sensitive columns blanked server-side (never sent in the response); registered users see all data |
+| **Cognito authentication** | Email/password login, forgot password, and a managed registration flow with admin approval |
+| **Admin approval workflow** | New registrations trigger an admin email; admin clicks approve/reject; approved users receive a time-limited registration link (7-day HMAC-signed token, replay-protected via S3) |
+| **SES transactional email** | Approval, rejection, and contact emails via AWS SES (cross-account role) |
+| **Usage event logging** | Every search, click, and page view is logged as a structured JSON event to S3 |
+| **Zero infrastructure overhead** | Entire backend is a single Lambda function with a Function URL — no API Gateway, no servers, no database |
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| **Frontend** | React 19, TypeScript, Vite 7 |
-| **UI Library** | Material UI (MUI) v5 |
-| **Tables** | TanStack Table v8 + TanStack Virtual v3 |
-| **Routing** | React Router DOM v7 |
-| **Authentication** | Amazon Cognito (`amazon-cognito-identity-js`) |
-| **Backend** | AWS Lambda (Node.js 20, ESM) |
-| **Static files** | Amazon S3 (served through Lambda) |
-| **Data storage** | Amazon S3 (JSON data files + event logs) |
-| **Email** | AWS SES (`@aws-sdk/client-ses`) |
-| **JWT Verification** | `aws-jwt-verify` v4 |
-| **Deployment** | AWS Lambda Function URL (public HTTPS) |
+### Frontend
+
+| Technology | Version | Why |
+|-----------|---------|-----|
+| **React** | 19 | Component model, hooks, concurrent rendering |
+| **TypeScript** | 5.9 | Type safety across the full frontend codebase |
+| **Vite** | 7 | Fast HMR in dev, optimised ESM bundles for production |
+| **Material UI (MUI)** | 5 | Comprehensive component library; Spearhead blue theme (`#2D89EF`) |
+| **TanStack Table** | 8 | Headless, high-performance virtualised table with sorting and filtering |
+| **TanStack Virtual** | 3 | Row virtualisation — renders only visible rows for large datasets |
+| **amazon-cognito-identity-js** | 6 | Browser-native Cognito SDK for login, registration, token management |
+| **React Router DOM** | 7 | SPA routing (`/login`, `/register`, `/forgot-password`) |
+
+### Backend (Lambda)
+
+| Technology | Version | Why |
+|-----------|---------|-----|
+| **Node.js** | 18+ ESM | Lambda-native `.mjs` modules — no compile step required |
+| **AWS Lambda** | — | Single function serves both frontend static files and all API routes |
+| **Amazon S3** | — | Stores frontend dist, data JSON files, pre-computed embeddings, and usage logs |
+| **Amazon Cognito** | — | User pool for authentication; JWT verified server-side on every API call |
+| **Amazon Bedrock** | — | Titan Text Embeddings v2 for vector search; Nova Lite for "Why Matched" generation |
+| **Amazon SES** | — | Transactional email via cross-account IAM role |
+| **aws-jwt-verify** | 4 | Fast, spec-compliant Cognito JWT verification in Lambda |
+
+### Infrastructure
+
+| Service | Purpose |
+|---------|---------|
+| **Lambda Function URL** | Public HTTPS endpoint — no API Gateway needed |
+| **S3** | Static hosting + data store + log sink |
+| **Cognito User Pool** | Authentication, registration, password reset |
+| **SES** | Email delivery |
+| **STS** | Cross-account role assumption for SES (credentials cached per Lambda container) |
+
+---
+
+## How It Works
+
+### Request Flow
+
+```
+Browser
+  │
+  └─► Lambda Function URL  (public HTTPS)
+        │
+        ├─ GET /                     → S3: dist/index.html
+        ├─ GET /assets/*             → S3: dist/assets/* (long-cache headers)
+        ├─ GET /api/data/use-cases   → S3: use_cases.json
+        │                               (sensitive columns blanked if no JWT)
+        ├─ GET /api/data/industry    → S3: industry_use_cases.json
+        │                               (sensitive columns blanked if no JWT)
+        ├─ GET /api/columns-config   → Lambda env vars (no S3 call needed)
+        ├─ POST /api/validate-email  → domain blocklist check + HMAC token verify
+        ├─ GET /api/approve?token=   → SES email to user with registration link
+        ├─ GET /api/reject?token=    → SES rejection email to user
+        ├─ POST /api/contact         → SES email to admin (auth required)
+        ├─ POST /api/search          → Bedrock vector search + Nova Lite explanations (auth required)
+        ├─ POST /api/search/industry → Same for industry dataset (auth required)
+        └─ POST /api/log             → S3: logs/{date}/{eventId}.json
+
+Browser ──► Cognito User Pool (direct SDK — not proxied through Lambda)
+```
+
+### AI Search Pipeline
+
+```
+User types query
+      │
+      ▼
+Frontend POSTs { query, limit } to /api/search with Bearer token
+      │
+      ▼
+Lambda verifies Cognito JWT  →  401 if not authenticated
+      │
+      ▼
+Bedrock: amazon.titan-embed-text-v2:0
+  Generates 1024-dim L2-normalised embedding of the query
+      │
+      ▼
+In-memory FlatIP index (loaded once from S3, cached per Lambda container)
+  Cosine similarity search → top-K use cases
+      │
+      ▼
+Bedrock: us.amazon.nova-lite-v1:0
+  Generates 1–2 sentence "Why Matched" explanation per result
+      │
+      ▼
+Response: [{ useCase, score, whyMatched }, ...]
+      │
+      ▼
+Frontend renders "Why Matched" column in results table
+```
+
+If `ENABLE_AI_SEARCH=false` or Bedrock fails, the pipeline automatically falls back to **keyword search**: term-frequency scoring across pre-defined text fields, no Bedrock calls needed.
+
+### Authentication and Column Access Control
+
+1. **Unauthenticated** users can browse both tables — but sensitive columns are blanked **server-side** (empty strings in the JSON response, never sent). The column headers still render with a lock icon via `RestrictedCell`.
+2. To unlock full data, users register via `/register`. Their domain is checked against a blocklist (Gmail, Yahoo, Hotmail, etc.). Corporate domains pass through.
+3. An admin receives an email, clicks **Approve**, and the user gets a registration-completion link.
+4. **Authenticated** users send their Cognito ID token as `Authorization: Bearer <token>` on every API call. Lambda verifies the JWT against the Cognito JWKS endpoint using `aws-jwt-verify`.
 
 ---
 
 ## Architecture
 
-```
-Browser
-  │
-  └─► Lambda Function URL  (HTTPS, public — no IAM auth)
-        │
-        ├─ GET /              ──► S3 dist/index.html         (SPA entry)
-        ├─ GET /assets/*      ──► S3 dist/assets/*           (JS, CSS, images)
-        ├─ GET /api/data/use-cases    ──► S3 use_cases.json  (filtered by auth)
-        ├─ GET /api/data/industry     ──► S3 industry_use_cases.json
-        ├─ GET /api/columns-config    ──► reads Lambda env vars
-        ├─ POST /api/validate-email   ──► domain check + approval token verify
-        ├─ GET /api/approve           ──► SES approval email to user
-        ├─ GET /api/reject            ──► SES rejection email to user
-        ├─ POST /api/contact          ──► SES email to CONTACT_EMAIL
-        └─ POST /api/log              ──► S3 logs/{date}/{eventId}.json
-
-Browser ──► Cognito User Pool  (SDK direct calls — not proxied through Lambda)
-                                (registration, login, forgot password, session)
-```
-
-**Authenticated data flow:**
-
-```
-Frontend                        Lambda                       Cognito
-   │                               │                            │
-   ├─ GET /api/data/use-cases ──►  │                            │
-   │   Authorization: Bearer {idToken}                          │
-   │                               ├─ CognitoJwtVerifier ──────►│
-   │                               │◄── valid / invalid ────────┤
-   │                               │                            │
-   │                               ├─ valid:   return ALL columns
-   │                               └─ invalid: strip restricted columns
-   │◄──────────────── filtered JSON ──────────────────────────────┘
-```
-
----
-
-## Project Structure
+### Directory Structure
 
 ```
 aiuc/
-├── src/                          # React/TypeScript frontend source
+├── src/                               Frontend (React + TypeScript)
+│   ├── App.tsx                        Entry point: tabs, auth state, header/footer
 │   ├── components/
-│   │   ├── UseCaseTable.tsx      # "Case Study" tab — virtualized data table
-│   │   ├── IndustryDataTable.tsx # "Industry Data" tab — virtualized data table
-│   │   ├── LoginForm.tsx         # Cognito email/password login
-│   │   ├── RegisterForm.tsx      # Multi-step Cognito registration
-│   │   ├── ForgotPasswordForm.tsx# 3-screen password reset flow
-│   │   ├── ContactDialog.tsx     # "I'm Interested" modal (sends SES email)
-│   │   ├── RestrictedCell.tsx    # Blurred cell for restricted columns
-│   │   └── Logo.tsx              # Image with text fallback
-│   ├── config/
-│   │   ├── cognito.ts            # CognitoUserPool client (reads VITE_ env vars)
-│   │   └── restrictedColumns.ts  # Fallback restricted column lists
+│   │   ├── UseCaseTable.tsx           Case Study data table (filters, AI search, Why Matched)
+│   │   ├── IndustryDataTable.tsx      Industry data table (same feature set)
+│   │   ├── LoginForm.tsx              Cognito email/password login
+│   │   ├── RegisterForm.tsx           Registration (domain validation → Cognito sign-up)
+│   │   ├── ForgotPasswordForm.tsx     Forgot password (email → code → new password)
+│   │   ├── ContactDialog.tsx          Send interest email via /api/contact
+│   │   └── RestrictedCell.tsx         Lock icon for blanked columns
 │   ├── hooks/
-│   │   ├── useCognitoUser.ts     # Session check → userName, userEmail, isRegistered
-│   │   ├── useColumnsConfig.ts   # Fetches /api/columns-config (module-level cache)
-│   │   ├── useS3Data.ts          # Fetches /api/data/* with Cognito Bearer token
-│   │   └── useLogger.ts          # Fire-and-forget POST /api/log
-│   ├── App.tsx                   # Layout: header, tab bar, tables, footer
-│   ├── main.tsx                  # Routes: /, /login, /register, /forgot-password
-│   ├── theme.ts                  # MUI theme — Pure Orange (#fe5000)
-│   └── types.ts                  # UseCaseData, IndustryData interfaces
+│   │   ├── useCognitoUser.ts          Session state: userName, userEmail, isRegistered
+│   │   ├── useS3Data.ts               Fetches /api/data/use-cases + /api/data/industry
+│   │   ├── useSearchApi.ts            Calls /api/search and /api/search/industry with JWT
+│   │   ├── useColumnsConfig.ts        Fetches /api/columns-config (which columns restricted)
+│   │   └── useLogger.ts               Fire-and-forget event logging to /api/log
+│   ├── config/
+│   │   ├── cognito.ts                 CognitoUserPool from VITE_ env vars
+│   │   └── appConfig.ts               Contact email, tooltip text
+│   └── types.ts                       TypeScript interfaces for all data shapes
 │
-├── lambda/
-│   ├── index.mjs                 # Lambda handler — all routes for production
-│   ├── server.mjs                # Local dev server — mirrors Lambda API routes
-│   └── package.json              # Lambda dependencies (AWS SDK v3, aws-jwt-verify)
+├── lambda/                            Backend (Node.js ESM — runs in AWS Lambda)
+│   ├── index.mjs                      Lambda handler — all routes in a single file
+│   ├── server.mjs                     Local dev HTTP server (mirrors Lambda routes)
+│   ├── core/
+│   │   ├── search.mjs                 FlatIP index, vector search, keyword fallback
+│   │   ├── embeddings.mjs             Bedrock Titan embedding + L2 normalise
+│   │   ├── why_matched.mjs            Bedrock Nova Lite "Why Matched" generation
+│   │   ├── api_handlers.mjs           handleUseCaseSearch / handleIndustrySearch
+│   │   └── ai_toggle.mjs              ENABLE_AI_SEARCH feature flag
+│   └── package.json                   Lambda-only deps (@aws-sdk/*, aws-jwt-verify)
 │
-├── public/
-│   └── assets/
-│       ├── spearhead.svg         # Favicon + header logo (SVG)
-│       ├── spearhead.png         # Footer logo (PNG)
-│       └── purelogo.png          # Pure Storage logo (login/register forms)
+├── public/data/                       Local dev data files (not committed to git)
+│   ├── use_cases.json
+│   ├── industry_use_cases.json
+│   ├── use_cases_embeddings.json
+│   └── industry_use_cases_embeddings.json
 │
-├── index.html                    # HTML shell (title, favicon, #root mount)
-├── vite.config.ts                # Vite: React plugin, /api/* proxy → localhost:3001
-├── package.json                  # Root scripts + frontend dependencies
-└── .env                          # Local environment variables (git-ignored)
+├── eval/                              Model evaluation framework (not deployed)
+│   ├── evaluate_models.mjs            Benchmarks Bedrock models for Why Matched
+│   └── results/
+│       ├── evaluation_results.json
+│       └── report.html
+│
+├── vite.config.ts                     Vite config (React plugin, /api proxy to :3001)
+├── .env.example                       All environment variables documented
+└── DEPLOYMENT.md                      Full step-by-step AWS deployment guide
 ```
 
 ---
 
-## Prerequisites
+## Local Development
+
+### Prerequisites
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Node.js | ≥ 18.x | https://nodejs.org |
-| npm | ≥ 9.x | Included with Node.js |
-| AWS CLI | ≥ 2.x | https://aws.amazon.com/cli/ |
-| AWS account | — | Required for SES email in local dev |
+| Node.js | ≥ 18 | https://nodejs.org |
+| npm | ≥ 9 | Bundled with Node.js |
+| AWS CLI | ≥ 2 | https://aws.amazon.com/cli |
+| AWS credentials | — | With Bedrock + S3 access for AI search |
+
+### 1. Clone and install
 
 ```bash
-# Verify installed versions
-node --version    # must be 18+
-npm --version     # must be 9+
-aws --version     # must be 2+
-```
-
----
-
-## Local Development Setup
-
-### 1. Clone and install dependencies
-
-```bash
-git clone https://github.com/NachiketAxia19/aiuc.git
+git clone https://github.com/SpearheadCorp/aiuc.git
 cd aiuc
 
-# Install frontend dependencies
+# Frontend dependencies
 npm install
 
-# Install Lambda dependencies (separate node_modules)
+# Lambda dependencies
 cd lambda && npm install && cd ..
 ```
 
-### 2. Create the environment file
+### 2. Set up environment variables
 
-Create `.env` in the project root (the Lambda dev server loads this automatically):
+```bash
+cp .env.example .env
+```
+
+Minimum required values:
 
 ```env
-# ── Cognito (frontend auth — baked into bundle at build time) ──
-VITE_COGNITO_USER_POOL_ID=us-east-2_XXXXXXXXX
-VITE_COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_AWS_REGION=us-east-2
-VITE_REDIRECT_URI=https://xxx.lambda-url.us-east-2.on.aws
+# Cognito (from AWS Console → Cognito → User Pools)
+VITE_COGNITO_USER_POOL_ID=us-east-1_XXXXXXXXX
+VITE_COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+VITE_COGNITO_REGION=us-east-1
 
-# ── SES email (local dev server) ──
-SES_FROM_EMAIL=aiuc@spearhead.so
-SES_REGION=us-east-2
+# Local API server (Vite proxies /api/* here)
+VITE_API_BASE_URL=http://localhost:3001
 
-# ── App config (local dev server) ──
-CONTACT_EMAIL=aiuc@spearhead.so
-APPROVAL_EMAIL=admin@spearhead.so
-APPROVAL_SECRET=change-me-to-a-long-random-string
-APP_URL=http://localhost:5173
-
-# ── AWS credentials (SSO profile) ──
-AWS_PROFILE=aiuc-local
+# AWS profile for local Bedrock + S3 calls
+AWS_PROFILE=your-profile-name
+AWS_REGION=us-east-1
 ```
 
-### 3. Set up AWS credentials
+### 3. Add local data files
 
-The local API server sends emails via SES and needs AWS credentials. This project uses AWS SSO (federated login):
+The data files are not committed to git. Place these four files in `public/data/`:
 
-```bash
-# First-time SSO profile setup
-aws configure sso --profile aiuc-local
-# Enter: SSO start URL, SSO region, account ID, role, output format
-
-# Login (run this each time your session expires — opens browser)
-aws sso login --profile aiuc-local
+```
+public/data/
+├── use_cases.json                      Use case rows
+├── industry_use_cases.json             Industry rows
+├── use_cases_embeddings.json           Pre-computed Bedrock Titan embeddings
+└── industry_use_cases_embeddings.json  Pre-computed industry embeddings
 ```
 
-> If you have static IAM credentials (Access Key + Secret), you can set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in `.env` instead of using a profile.
+The local dev server reads embeddings from `public/data/` via the filesystem — no S3 access required locally.
 
-### 4. Start development servers
+### 4. Start both servers
 
-Open **two terminals**:
+**Terminal 1 — Local API server:**
 
 ```bash
-# Terminal 1 — local API server (mirrors all Lambda routes)
-npm run dev:api
-# → http://localhost:3001
+node lambda/server.mjs
+# Listening at http://localhost:3001
+# Reads embeddings from public/data/
+# Uses your AWS_PROFILE for Bedrock (why-matched generation)
+```
 
-# Terminal 2 — Vite dev server
+**Terminal 2 — Vite frontend:**
+
+```bash
 npm run dev
-# → http://localhost:5173
-# All /api/* requests are proxied to localhost:3001 automatically
+# Available at http://localhost:5173
+# All /api/* requests proxied to localhost:3001
 ```
 
-Open http://localhost:5173
+### Available Scripts
+
+| Command | What it does |
+|---------|-------------|
+| `npm run dev` | Start Vite dev server with HMR at `localhost:5173` |
+| `npm run build` | TypeScript check + Vite production build → `dist/` |
+| `npm run preview` | Preview the production build locally |
+| `npm run lint` | Run ESLint on the frontend source |
+| `node lambda/server.mjs` | Start local API server at `localhost:3001` |
+| `node eval/evaluate_models.mjs` | Run Bedrock model evaluation (requires AWS credentials) |
 
 ---
 
 ## Environment Variables
 
-### Frontend variables (`.env` — embedded at build time)
+### Frontend (Vite build-time — `VITE_` prefix)
 
-Prefixed `VITE_` — these are compiled into the JavaScript bundle. Changing them requires a rebuild.
+Baked into the compiled bundle at `npm run build` time:
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VITE_COGNITO_USER_POOL_ID` | Yes | Cognito User Pool ID (e.g. `us-east-2_AbCdEfGhI`) |
-| `VITE_COGNITO_CLIENT_ID` | Yes | Cognito App Client ID (public client, no secret) |
-| `VITE_AWS_REGION` | Yes | AWS region where Cognito pool lives |
-| `VITE_REDIRECT_URI` | Yes | Your app URL (for Cognito Hosted UI callbacks) |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `VITE_COGNITO_USER_POOL_ID` | Yes | — | Cognito User Pool ID (`us-east-1_XXXXXXXX`) |
+| `VITE_COGNITO_CLIENT_ID` | Yes | — | Cognito App Client ID (public client, no secret) |
+| `VITE_COGNITO_REGION` | Yes | — | AWS region of the user pool |
+| `VITE_API_BASE_URL` | Dev only | — | Proxied by Vite to local API server |
+| `VITE_CONTACT_EMAIL` | No | `aiuc@spearhead.so` | Contact email shown in footer |
 
-### Lambda environment variables (set in Lambda Console)
+### Lambda Runtime (set in AWS Lambda Console)
 
-| Variable | Required | Description | Example |
-|----------|----------|-------------|---------|
-| `BUCKET_NAME` | Yes | S3 bucket name | `aiuc` |
-| `S3_REGION` | Yes | S3 bucket region | `us-east-2` |
-| `DIST_PREFIX` | Yes | S3 folder containing the built `dist/` | `dist1` |
-| `SES_FROM_EMAIL` | Yes | Verified SES sender address | `nachiket.kapure@spearhead.so` |
-| `SES_REGION` | Yes | Region where SES identity is verified | `us-east-2` |
-| `CONTACT_EMAIL` | Yes | Receives contact form emails | `nachiket.kapure@spearhead.so` |
-| `APPROVAL_EMAIL` | Yes | Receives registration approval requests | `nachiket.kapure@ax-ia.ai` |
-| `APP_URL` | Yes | Lambda Function URL (no trailing slash) | `https://xxx.lambda-url.us-east-2.on.aws` |
-| `APPROVAL_SECRET` | Yes | HMAC-SHA256 secret for signing tokens | `a-long-random-string` |
-| `COGNITO_USER_POOL_ID` | Yes | For server-side JWT verification | `us-east-2_AbCdEfGhI` |
-| `COGNITO_CLIENT_ID` | Yes | For server-side JWT verification | `1ud7kicq2o4700g3l7v7flajgo` |
-| `USE_CASE_RESTRICTED_COLUMNS` | No | Comma-separated restricted column names | `AI Algorithms & Frameworks,Datasets` |
-| `INDUSTRY_RESTRICTED_COLUMNS` | No | Comma-separated restricted column names | `Implementation Plan,Datasets` |
-
-> `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` must match the `VITE_COGNITO_*` values used at build time.
-
----
-
-## Available Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start Vite dev server on http://localhost:5173 |
-| `npm run dev:api` | Start local API server on http://localhost:3001 |
-| `npm run build` | TypeScript check + Vite production bundle → `dist/` |
-| `npm run lint` | ESLint on all `.ts` / `.tsx` files |
-| `npm run preview` | Serve the production `dist/` build locally |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `APPROVAL_SECRET` | **Yes** | — | HMAC-SHA256 secret for signing approval tokens. Lambda throws on cold start if missing. |
+| `BUCKET_NAME` | Yes | — | S3 bucket containing data files and frontend dist |
+| `DIST_PREFIX` | Yes | — | S3 prefix for the compiled frontend (e.g. `dist`) |
+| `SES_FROM_EMAIL` | Yes | — | Verified SES sender address |
+| `SES_CROSS_ACCOUNT_ROLE_ARN` | Yes | — | IAM role ARN to assume for SES sends |
+| `COGNITO_USER_POOL_ID` | Yes | — | Server-side JWT verification |
+| `COGNITO_CLIENT_ID` | Yes | — | Server-side JWT verification |
+| `APP_URL` | Yes | — | Public URL of the app (used in approval email links) |
+| `CONTACT_EMAIL` | No | `aiuc@spearhead.so` | Where contact form emails are delivered |
+| `APPROVAL_EMAIL` | No | `CONTACT_EMAIL` | Where new registration notifications go |
+| `ENABLE_AI_SEARCH` | No | `true` | Set `"false"` to force keyword-only search |
+| `USE_CASES_EMBEDDINGS_KEY` | No | `use_cases_embeddings.json` | S3 key for use-case embeddings JSON |
+| `INDUSTRY_EMBEDDINGS_KEY` | No | `industry_use_cases_embeddings.json` | S3 key for industry embeddings JSON |
+| `USE_CASE_RESTRICTED_COLUMNS` | No | All sensitive columns | Comma-separated display names to blank for unauthenticated users |
+| `INDUSTRY_RESTRICTED_COLUMNS` | No | All sensitive columns | Same for industry table |
+| `LOG_PREFIX` | No | `logs` | S3 prefix for usage event logs |
+| `S3_REGION` | No | `AWS_REGION` | Region override for S3 client |
 
 ---
 
-## Authentication & Authorization
+## Building for Production
 
-### User registration
+```bash
+# 1. Build the Vite frontend
+npm run build
+# Output goes to dist/
 
-```
-1. User fills RegisterForm (email, name, password)
-         │
-         ▼
-2. POST /api/validate-email
-         │
-         ├─ Approval token provided?
-         │     └─ Verify HMAC + expiry, check S3 for replay
-         │           allowed → go to step 4
-         │
-         └─ No token: check email domain
-               ├─ Personal domain (gmail, yahoo, hotmail...)? → blocked
-               └─ Work domain → allowed
-                       │
-                       ▼
-3. Admin receives SES email with Approve / Reject links
-         │
-         ▼ (after admin approves, user gets email with personal registration link)
-         │
-4. Frontend calls Cognito SignUp → user receives email verification code
-         │
-         ▼
-5. User enters code → Cognito confirms account → login enabled
+# 2. Upload dist/ to S3
+aws s3 sync dist/ s3://YOUR_BUCKET/dist/ --delete
+
+# 3. Package the Lambda function (no build step — plain .mjs)
+cd lambda
+zip -r ../lambda.zip index.mjs core/ node_modules/ package.json
+cd ..
+
+# 4. Deploy Lambda zip
+aws lambda update-function-code \
+  --function-name YOUR_FUNCTION_NAME \
+  --zip-file fileb://lambda.zip
 ```
 
-### Login
+**Lambda handler setting:** `index.handler`  
+**Node.js runtime:** `nodejs18.x` or `nodejs20.x`
 
-1. User enters email + password on `/login`
-2. `amazon-cognito-identity-js` calls `authenticateUser()` against Cognito
-3. On success: Cognito stores ID token in browser localStorage (handled by SDK)
-4. `useCognitoUser` hook reads session → decodes `name` + `email` attributes
-5. App shows authenticated UI with user greeting and full data access
-
-### Password reset
-
-1. `/forgot-password` — user enters email
-2. Cognito sends 6-digit code to email
-3. User enters code + new password
-4. `confirmPassword()` updates Cognito account
-
-### Data authorization
-
-- `useS3Data` hook reads Cognito ID token from current session
-- Attaches it as `Authorization: Bearer {idToken}` on all `/api/data/*` requests
-- Lambda verifies with `CognitoJwtVerifier` — valid token → all columns; no/invalid token → restricted columns blanked
+> Only `lambda/node_modules/` goes in the zip — not the root `node_modules/` (that's frontend-only).
 
 ---
 
-## Column-Level Access Control
+## Lambda Deployment
 
-### Two-layer protection
+Full step-by-step instructions are in [`DEPLOYMENT.md`](./DEPLOYMENT.md). Summary of required AWS services:
 
-| Layer | Mechanism | When applied |
-|-------|-----------|-------------|
-| **Frontend** | `RestrictedCell` blurs the value (CSS filter) + lock icon | Always for restricted cols when user not logged in |
-| **Backend** | Lambda strips restricted column keys from JSON before sending | When no valid JWT provided |
+| Service | Purpose | Free Tier |
+|---------|---------|-----------|
+| Lambda | Serves frontend + all API routes | 1M requests/month |
+| S3 | Frontend dist, data JSON, usage logs | 5 GB storage |
+| Cognito | User registration + authentication | 50K MAU |
+| SES | Transactional email | 3K emails/month (in production) |
+| Bedrock | Embeddings + text generation | Pay-per-use |
 
-This ensures data is never exposed even if someone bypasses the UI.
+### IAM Permissions Required by Lambda Execution Role
 
-### Change restricted columns without redeploying
-
-Edit **Lambda environment variables** in the Lambda Console:
-
-```
-USE_CASE_RESTRICTED_COLUMNS  =  AI Algorithms & Frameworks,Datasets,Action / Implementation,AI Tools & Models,Digital Platforms and Tools
-INDUSTRY_RESTRICTED_COLUMNS  =  Implementation Plan,Datasets,AI Tools / Platforms,Digital Tools / Platforms,AI Frameworks,AI Tools and Models,Industry References
-```
-
-- Comma-separated, no leading/trailing spaces around values
-- Column names are **case-sensitive** and must match the data exactly
-- Changes take effect on next Lambda invocation — no redeploy needed
-
-### Change defaults in code
-
-Edit `src/config/restrictedColumns.ts` (used when `/api/columns-config` is unreachable):
-
-```typescript
-export const USE_CASE_RESTRICTED_COLUMNS: string[] = [
-  "AI Algorithms & Frameworks",
-  "Datasets",
-  // ...
-];
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "s3:GetObject",
+    "s3:PutObject",
+    "bedrock:InvokeModel",
+    "sts:AssumeRole"
+  ],
+  "Resource": "*"
+}
 ```
 
-Requires a frontend rebuild and redeployment after changes.
+### Generating and Uploading Embeddings
+
+Before AI search works in production, pre-compute embeddings and upload to S3:
+
+```bash
+# Run from project root — requires AWS credentials with bedrock:InvokeModel
+node scripts/generate-embeddings.mjs
+
+# Upload to your S3 bucket
+aws s3 cp public/data/use_cases_embeddings.json \
+    s3://YOUR_BUCKET/use_cases_embeddings.json
+
+aws s3 cp public/data/industry_use_cases_embeddings.json \
+    s3://YOUR_BUCKET/industry_use_cases_embeddings.json
+```
+
+---
+
+## AI Search — Bedrock Model Evaluation
+
+The `eval/` directory contains a benchmarking framework that tests Bedrock generation models for the **"Why Matched"** explanation task.
+
+### Why This Evaluation Exists
+
+The "Why Matched" feature calls a generation model on every search to explain why each result matches the user's query. The model must:
+1. Follow the JSON array output format reliably
+2. Be fast enough not to delay search results noticeably
+3. Be cost-effective at scale (many users × many queries)
+
+### Models Benchmarked
+
+All models are accessed via **Amazon Bedrock** (data stays within AWS — no external API):
+
+| Model | Provider | Tier | Input / 1K tokens | Output / 1K tokens | Notes |
+|-------|----------|------|-------------------|--------------------|-------|
+| `us.amazon.nova-micro-v1:0` | Amazon | Budget | $0.000035 | $0.00014 | Text-only, fastest, cheapest |
+| `us.amazon.nova-lite-v1:0` | Amazon | Balanced | $0.00006 | $0.00024 | **Current production model** |
+| `us.amazon.nova-pro-v1:0` | Amazon | Premium | $0.0008 | $0.0032 | Best quality in the Nova family |
+| `us.anthropic.claude-3-5-haiku-20241022-v1:0` | Anthropic | Premium | $0.0008 | $0.004 | Best JSON reliability |
+
+**Embedding model (fixed baseline — not under test):**  
+`amazon.titan-embed-text-v2:0` at $0.00002 per 1K tokens
+
+### Test Queries
+
+The evaluation uses 8 representative real-world employee queries:
+
+```
+- automate customer support with chatbots
+- predictive analytics for supply chain and inventory optimization
+- fraud detection and risk scoring in financial transactions
+- personalized product recommendations for e-commerce customers
+- HR talent acquisition and resume screening with AI
+- real-time quality control inspection using computer vision
+- sentiment analysis on customer feedback and reviews
+- demand forecasting for retail and manufacturing
+```
+
+### Metrics Measured per Model × Query
+
+| Metric | How measured |
+|--------|-------------|
+| **Latency** | Wall-clock time for `InvokeModel` call (ms) |
+| **Input tokens** | From Bedrock response `usage` field |
+| **Output tokens** | From Bedrock response `usage` field |
+| **Cost per query** | `(inputTokens/1K × inputRate) + (outputTokens/1K × outputRate)` |
+| **JSON parse success** | Whether response contains a parseable JSON array |
+| **Explanation quality** | Manual review: relevance, specificity, conciseness |
+
+### Running the Evaluation
+
+```bash
+# Prerequisites: AWS credentials with bedrock:InvokeModel on all model ARNs
+# Embeddings must exist at: data/use_cases_embeddings.json (relative to project root)
+
+cd eval
+npm install
+AWS_REGION=us-east-1 node evaluate_models.mjs
+
+# Results are written to:
+# eval/results/evaluation_results.json   — machine-readable
+# eval/results/report.html              — human-readable HTML report
+```
+
+### AWS Bedrock vs OpenAI — Decision Summary
+
+The system is designed to run **entirely within AWS** — no OpenAI API calls are made in the current implementation. Here is the full rationale and comparison:
+
+| Criteria | AWS Bedrock (current) | OpenAI API |
+|----------|----------------------|------------|
+| **Data residency** | Data stays within AWS account/region — required for enterprise compliance | Data sent to OpenAI's infrastructure |
+| **IAM integration** | Native IAM roles — no API keys to manage or rotate | Requires API key storage and rotation |
+| **Network latency** | Lower for embeddings — Bedrock runs co-located with Lambda in the same region | External HTTPS call adds ~100–200ms round-trip |
+| **Embedding cost** | Titan v2: $0.00002 / 1K tokens | text-embedding-3-small: $0.00002 / 1K tokens *(identical)* |
+| **Generation cost** | Nova Lite: ~$0.0003/query at typical token counts | GPT-4o-mini: ~$0.001/query *(~3× more expensive)* |
+| **JSON reliability** | Nova Lite: good; Claude Haiku via Bedrock: excellent | GPT-4o-mini with `response_format: json_object`: excellent |
+| **Model selection** | Nova Micro / Lite / Pro + Claude family via one Bedrock SDK | GPT-3.5 / 4 / 4o family via OpenAI SDK |
+| **Vendor lock-in** | Tied to AWS ecosystem | Tied to OpenAI |
+| **Compliance / audit** | AWS CloudTrail logs every Bedrock call natively | No built-in audit trail in AWS |
+
+**Verdict:** Bedrock Nova Lite is the current production choice. It satisfies the enterprise data-residency requirement, costs approximately 3× less per query than equivalent OpenAI models, and reliably produces structured JSON output. If explanation quality needs upgrading, **Claude 3.5 Haiku via Bedrock** is available without leaving AWS — it offers the best instruction-following and JSON reliability in the benchmark.
+
+To add OpenAI to the evaluation:
+1. Add `openai` to `eval/package.json`
+2. Add OpenAI model entries to `GENERATION_MODELS` in `eval/evaluate_models.mjs`
+3. Add an OpenAI-specific request builder (similar to the `model.provider === "Anthropic"` branch)
+4. Re-run: `node evaluate_models.mjs`
 
 ---
 
 ## Admin Approval Workflow
 
-When a user with a new work email registers:
-
-1. User submits RegisterForm → `POST /api/validate-email` allows the domain
-2. User sees "Pending Approval" screen and waits
-3. Admin receives this SES email at `APPROVAL_EMAIL`:
+New user registrations go through a two-step approval to control access:
 
 ```
-Subject: [AIUC] New Registration Request
-
-Name:  John Doe
-Email: john@company.com
-
-Approve: https://xxx.lambda-url.on.aws/api/approve?token=<signed-token>
-Reject:  https://xxx.lambda-url.on.aws/api/reject?token=<signed-token>
+User submits /register
+        │
+        ▼
+POST /api/validate-email
+  ├─ Blocks personal email domains (gmail, yahoo, hotmail, icloud, etc.)
+  └─ Allows any corporate or institutional domain
+        │
+        ▼  (domain approved)
+User completes Cognito sign-up (email + password + name)
+        │
+        ▼
+Admin receives notification email
+  Contains [Approve] and [Reject] links
+  Each link has an HMAC-SHA256-signed token valid for 7 days
+        │
+        ├─ Admin clicks Approve → GET /api/approve?token=...
+        │     └─ Lambda verifies token
+        │        └─ Lambda sends user a registration-completion link
+        │             (new HMAC token, valid 7 more days)
+        │             Token hash stored in S3 used_tokens/ after first use
+        │
+        └─ Admin clicks Reject → GET /api/reject?token=...
+              └─ Lambda sends user a polite rejection email
 ```
 
-4. **Admin clicks Approve** →
-   - Lambda verifies HMAC signature and expiry
-   - Checks S3 `used_tokens/` to prevent replay
-   - Sends user a personal registration link (valid 7 days)
-   - User clicks link → pre-approved → can complete Cognito signup
-
-5. **Admin clicks Reject** →
-   - Sends user a rejection email mentioning `CONTACT_EMAIL` for appeals
-
-**Token properties:**
-- HMAC-SHA256 signed with `APPROVAL_SECRET`
-- 7-day expiry embedded in payload
-- One-time use: SHA256 hash stored in S3 on first use, rejected on reuse
+**Security properties:**
+- Tokens are HMAC-SHA256 signed with `APPROVAL_SECRET` — unforgeable without the key
+- `timingSafeEqual` comparison prevents timing side-channel attacks
+- Expiry is embedded in the token payload (not just a timeout)
+- **Replay protection:** approval tokens are SHA-256 hashed and stored as S3 objects under `used_tokens/` after first use. Submitting the same token twice returns `{ allowed: false, reason: "token_already_used" }`
 
 ---
 
-## Analytics & Usage Logs
+## Column Access Control
 
-Every user action is fire-and-forget logged to S3. Errors are swallowed — logging never affects the user experience.
+Specific columns are stripped server-side before the JSON response is sent to unauthenticated users. This is controlled by Lambda environment variables — no redeploy required to change them.
 
-**S3 path:** `s3://BUCKET_NAME/logs/YYYY-MM-DD/{uuid}.json`
+**Default restricted columns — Use Cases table:**
+- AI Algorithms & Frameworks
+- Datasets
+- Action / Implementation
+- AI Tools & Models
+- Digital Platforms and Tools
 
-**Logged events:**
+**Default restricted columns — Industry table:**
+- Implementation Plan
+- Datasets
+- AI Tools / Platforms
+- Digital Tools / Platforms
+- AI Frameworks
+- AI Tools and Models
+- Industry References
 
-| Event type | Triggered by |
-|-----------|-------------|
-| `page_view` | App load |
-| `search` | Text entered in search box |
-| `filter` | Column filter applied |
-| `click` | Tab switch, button click |
-| `column_click` | Column header click |
-| `row_click` | Table row expanded / contact dialog opened |
-| `register` | Successful Cognito account creation |
+To change which columns are restricted, update Lambda env vars:
 
-**Log entry format:**
+```bash
+# In AWS Lambda Console → Configuration → Environment Variables:
+USE_CASE_RESTRICTED_COLUMNS=AI Algorithms & Frameworks,Datasets
+INDUSTRY_RESTRICTED_COLUMNS=Implementation Plan,Datasets
+```
+
+> Use the **display names** (with spaces and ampersands), not the JSON keys.
+
+The frontend fetches the config from `/api/columns-config` on load and renders a `RestrictedCell` (lock icon + tooltip) for any blanked fields.
+
+---
+
+## Usage Logging
+
+Every meaningful user action is logged to S3 as a structured JSON event:
+
+```
+s3://YOUR_BUCKET/logs/YYYY-MM-DD/{eventId}.json
+```
+
+Example event:
+
 ```json
 {
   "eventId": "550e8400-e29b-41d4-a716-446655440000",
-  "timestamp": "2025-04-07T12:00:00.000Z",
+  "timestamp": "2026-04-15T12:34:56.789Z",
   "eventType": "search",
   "userEmail": "user@company.com",
-  "userName": "John Doe",
-  "sessionId": "550e8400-...",
-  "data": { "query": "machine learning automation" }
+  "userName": "Jane Smith",
+  "sessionId": "abc123",
+  "data": { "query": "fraud detection" }
 }
 ```
 
-**Export logs for analysis:**
-```bash
-# Download all logs for a specific date
-aws s3 sync s3://YOUR-BUCKET/logs/2025-04-07/ ./logs/ --profile aiuc-local
+**Supported event types:** `search`, `click`, `column_click`, `row_click`, `filter`, `page_view`, `register`
 
-# List all log files
-aws s3 ls s3://YOUR-BUCKET/logs/ --recursive --profile aiuc-local
+Log failures always return HTTP 200 with `{ ok: false }` so the frontend never surfaces them to the user.
+
+To query logs, use AWS Athena against the S3 bucket or download directly:
+
+```bash
+aws s3 ls s3://YOUR_BUCKET/logs/2026-04-15/
+aws s3 cp s3://YOUR_BUCKET/logs/2026-04-15/ ./logs/ --recursive
 ```
 
 ---
 
 ## API Reference
 
-All routes are served by `lambda/index.mjs` (production) or `lambda/server.mjs` (local dev).
-
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/` | None | SPA entry — serves `dist/index.html` |
-| `GET` | `/assets/*` | None | Static assets from S3 (JS, CSS, images) |
-| `GET` | `/api/data/use-cases` | Optional JWT | Case Study data; restricted cols stripped if no valid JWT |
-| `GET` | `/api/data/industry` | Optional JWT | Industry data; restricted cols stripped if no valid JWT |
-| `GET` | `/api/columns-config` | None | Returns `{useCaseRestricted, industryRestricted}` from env vars |
-| `POST` | `/api/validate-email` | None | Checks email domain; verifies approval token if provided |
-| `GET` | `/api/approve` | Token param | Admin approval: sends user a registration link via SES |
-| `GET` | `/api/reject` | Token param | Admin rejection: sends user a rejection email via SES |
-| `POST` | `/api/contact` | None | Sends contact form email via SES to `CONTACT_EMAIL` |
-| `POST` | `/api/log` | None | Writes analytics event to S3 (always returns 200) |
-| `POST` | `/api/search` | Optional JWT | RAG use-case search — `{query, limit}` → `{results: [{useCase, score, whyMatched}]}` |
-| `POST` | `/api/search/industry` | Optional JWT | RAG industry search — `{query, limit}` → `{results: [{item, score, whyMatched}]}` |
+| `GET` | `/api/data/use-cases` | Optional | Use case rows; restricted columns blanked without JWT |
+| `GET` | `/api/data/industry` | Optional | Industry rows; restricted columns blanked without JWT |
+| `GET` | `/api/columns-config` | None | Returns restricted column names for both tables |
+| `POST` | `/api/search` | Required | Semantic search over use cases → `[{ useCase, score, whyMatched }]` |
+| `POST` | `/api/search/industry` | Required | Semantic search over industry data → `[{ item, score, whyMatched }]` |
+| `POST` | `/api/validate-email` | None | Domain validation + approval token verify |
+| `POST` | `/api/contact` | Required | Send interest email via SES |
+| `POST` | `/api/log` | None | Log a usage event to S3 |
+| `GET` | `/api/approve?token=` | HMAC token | Admin approves a registration request |
+| `GET` | `/api/reject?token=` | HMAC token | Admin rejects a registration request |
 
----
+**Authentication:** Include the Cognito ID token as `Authorization: Bearer <idToken>` in the request header.
 
-## Deployment to AWS
+**Search request body:**
+```json
+{ "query": "automate invoice processing", "limit": 10 }
+```
 
-See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the complete step-by-step guide.
-
-**Quick redeploy after code changes:**
-
-```bash
-# Step 1 — Build the frontend
-npm run build
-
-# Step 2 — Upload frontend to S3
-#   Replace BUCKET and PREFIX with your actual values
-aws s3 sync dist/ s3://YOUR-BUCKET/dist1/ --delete
-
-# Step 3 — Package Lambda
-cd lambda
-npm install --omit=dev
-zip -r ../lambda.zip .
-cd ..
-
-# Step 4 — Deploy Lambda
-aws lambda update-function-code \
-  --function-name aiuc-frontend \
-  --zip-file fileb://lambda.zip
+**Search response:**
+```json
+{
+  "results": [
+    {
+      "useCase": { "ai_use_case": "...", "business_function": "...", ... },
+      "score": 0.87,
+      "whyMatched": "This use case directly addresses invoice automation using OCR..."
+    }
+  ]
+}
 ```
 
 ---
 
 ## Troubleshooting
 
-### Blurred columns don't clear after login
-The session check is async. Wait for the loading spinner to disappear. If the issue persists, open browser DevTools → Application → Local Storage → clear entries for your domain → reload.
+### AI search returns 404 locally
 
-### Local dev: `/api/contact` returns 500
-- Ensure `npm run dev:api` is running in a separate terminal
-- Run `aws sso login --profile aiuc-local` to refresh SSO credentials
-- Verify `SES_FROM_EMAIL` is a confirmed SES identity in the region set by `SES_REGION`
+The search routes require the updated `lambda/server.mjs` which imports from `lambda/core/api_handlers.mjs`. Make sure you're running the latest version and that `public/data/use_cases_embeddings.json` exists.
 
-### Local dev: "Could not load credentials from any providers"
-Your AWS SSO session has expired. Run:
+### AI search returns 401 in production
+
+Verify the Cognito ID token is being sent. The frontend's `useSearchApi` hook attaches the token automatically if the user is signed in — check that `useCognitoUser.isRegistered` is `true` before calling search.
+
+### "Search failed" in production
+
+1. Check `ENABLE_AI_SEARCH` — anything other than `"false"` enables AI search
+2. Verify Lambda has `bedrock:InvokeModel` on `amazon.titan-embed-text-v2:0` and `us.amazon.nova-lite-v1:0`
+3. Confirm embeddings files are uploaded to S3 at the keys in `USE_CASES_EMBEDDINGS_KEY` / `INDUSTRY_EMBEDDINGS_KEY`
+4. Check Lambda CloudWatch Logs for `[Embedding]` or `[WhyMatched]` error lines
+
+### Columns not blanking for unauthenticated users
+
+`USE_CASE_RESTRICTED_COLUMNS` must use **display names** with spaces and ampersands:
+
+```
+✓  AI Algorithms & Frameworks,Datasets
+✗  ai_algorithms_frameworks,datasets
+```
+
+### "APPROVAL_SECRET env var is required" on Lambda cold start
+
+Set `APPROVAL_SECRET` in Lambda Console → Configuration → Environment Variables. Any missing value causes an immediate throw at cold start.
+
+### SES emails not sending
+
+1. Confirm `SES_CROSS_ACCOUNT_ROLE_ARN` is set and Lambda's execution role has `sts:AssumeRole` on it
+2. Verify the assumed role has `ses:SendEmail` in the target account
+3. Confirm `SES_FROM_EMAIL` is a verified SES identity
+4. STS credentials are cached in-memory per Lambda container — a fresh invocation after container recycle will re-assume the role automatically
+
+### Registration link says "token already used"
+
+Approval tokens are single-use (replay protection). If the user needs a new link, they must re-register to generate a fresh approval request.
+
+### Lambda zip size too large
+
+Only `lambda/node_modules/` should be in the zip, not the root `node_modules/`:
+
 ```bash
-aws sso login --profile aiuc-local
+cd lambda
+npm install --omit=dev
+zip -r ../lambda.zip index.mjs core/ node_modules/ package.json
 ```
 
-### Lambda returns 500 on data routes
-- Verify `BUCKET_NAME` (bucket name only, not ARN)
-- Verify `DIST_PREFIX` matches the S3 folder you uploaded `dist/` into
-- Check CloudWatch Logs: Lambda Console → Monitor → View CloudWatch logs
+### Vite build fails after dependency update
 
-### SES "MessageRejected: Email address not verified"
-- Go to SES Console → Verified identities → verify `SES_FROM_EMAIL`
-- If in **SES sandbox mode**, all *recipient* addresses must also be verified
-- Request **SES production access** to send to any address (AWS Console → SES → Account dashboard → Request production access)
-
-### Approval email links point to localhost
-Set `APP_URL` in Lambda environment variables to your Lambda Function URL:
+```bash
+rm -rf node_modules
+npm install
+npm run build
 ```
-APP_URL = https://xxx.lambda-url.us-east-2.on.aws
-```
-
-### JWT verification fails / users see blurred data after login
-- `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` in Lambda env vars must exactly match `VITE_COGNITO_USER_POOL_ID` and `VITE_COGNITO_CLIENT_ID` used when the frontend was built
-- Rebuild the frontend if Cognito values changed
-
-### Registration: "UserNotConfirmedException"
-User signed up but hasn't confirmed their email code. They should check their inbox for the Cognito verification email and enter the 6-digit code. The RegisterForm has a "Resend code" option.
 
 ---
 
-*Confidential — Internal Use Only • Powered by Spearhead*
+## Project Context
+
+Built and maintained by **[Spearhead](https://spearhead.so)** as a configurable internal tool for enterprise clients. Each client deployment has its own branding (logo, colour theme, email domains, restricted columns) controlled entirely via environment variables — no code changes required between deployments.
+
+For questions or access issues: [aiuc@spearhead.so](mailto:aiuc@spearhead.so)

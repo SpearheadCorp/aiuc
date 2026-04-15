@@ -38,7 +38,6 @@ import {
   Paper,
   Tooltip,
   Switch,
-  FormControlLabel,
 } from "@mui/material";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import SearchIcon from "@mui/icons-material/Search";
@@ -187,7 +186,7 @@ export default function UseCaseTable({
     setIsSearching(true);
     setSearchError(null);
     try {
-      const results = await searchUseCases(q, 15);
+      const results = await searchUseCases(q, 10);
       setSearchResults(results);
       logSearch(q);
     } catch (err) {
@@ -476,17 +475,32 @@ export default function UseCaseTable({
         header: () => (
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
             <AutoAwesomeIcon sx={{ fontSize: 14, color: PURE_ORANGE }} />
-            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>
+            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.8rem" }}>
               Why Matched
             </Typography>
           </Box>
         ),
-        size: 280,
+        size: 240,
+        minSize: 240,
         enableSorting: false,
         cell: ({ row }: { row: any }) => (
-          <Box sx={{ py: 1, fontSize: "0.78rem", color: "#444", fontStyle: "italic", lineHeight: 1.5, whiteSpace: "normal" }}>
-            {row.original._whyMatched || ""}
-          </Box>
+          row.original._whyMatched ? (
+            <Box sx={{ py: 0.5, minWidth: 220 }}>
+              <Typography
+                variant="body2"
+                sx={{
+                  fontSize: "0.75rem",
+                  color: "#555",
+                  fontStyle: "italic",
+                  lineHeight: 1.5,
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                }}
+              >
+                {row.original._whyMatched}
+              </Typography>
+            </Box>
+          ) : null
         ),
       } as ColumnDef<UseCaseRow>] : []),
       {
@@ -920,147 +934,200 @@ export default function UseCaseTable({
         height: "100%",
       }}
     >
-      {/* ── AI Search Panel ─────────────────────────────────── */}
+      {/* ── Search Panel (styled to match reference design) ─── */}
       <Box
         sx={{
-          mb: 1.5,
-          p: 1.5,
-          border: `1px solid ${aiEnabled && searchMode ? PURE_ORANGE : "#e0e0e0"}`,
+          border: `1.5px solid ${PURE_ORANGE}`,
           borderRadius: "6px",
-          backgroundColor: aiEnabled && searchMode ? "#fff8f5" : "#fafafa",
-          transition: "all 0.2s ease",
+          backgroundColor: "#eef5fd",
+          px: 2,
+          pt: 1.25,
+          pb: 1.25,
+          mb: 1.5,
         }}
       >
-        {/* Header row: icon + label + toggle + clear button */}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <AutoAwesomeIcon sx={{ fontSize: 16, color: aiEnabled && isRegistered ? PURE_ORANGE : "#aaa" }} />
-          <Typography variant="body2" sx={{ fontWeight: 700, fontSize: "0.8rem", color: aiEnabled && isRegistered ? "#1a1a1a" : "#aaa" }}>
-            AI Search
-          </Typography>
-          <Tooltip title={!isRegistered ? "Login to use AI Search" : ""} placement="right">
-            <FormControlLabel
-              control={
+        {/* Card header row: toggle on left, clear action on right */}
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
+          {/* Left: AI Search label + toggle */}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            <AutoAwesomeIcon
+              sx={{ fontSize: 15, color: aiEnabled && isRegistered ? PURE_ORANGE : "#bbb" }}
+            />
+            <Typography
+              variant="body2"
+              sx={{ fontWeight: 700, fontSize: "0.875rem", color: aiEnabled && isRegistered ? "#1a1a1a" : "#999" }}
+            >
+              AI Search
+            </Typography>
+            <Tooltip title={!isRegistered ? "Login to use AI Search" : ""} placement="right">
+              <span>
                 <Switch
                   size="small"
-                  checked={aiEnabled}
+                  checked={aiEnabled && isRegistered}
                   disabled={!isRegistered}
-                  onChange={e => handleAISearchToggle(e.target.checked)}
+                  onChange={(e) => handleAISearchToggle(e.target.checked)}
                   sx={{
                     "& .MuiSwitch-switchBase.Mui-checked": { color: PURE_ORANGE },
                     "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { backgroundColor: PURE_ORANGE },
                   }}
                 />
-              }
-              label={
-                <Typography variant="body2" sx={{ fontSize: "0.72rem", color: "#666" }}>
-                  {aiEnabled ? "On" : "Off"}
-                </Typography>
-              }
-              sx={{ ml: 0.5, mr: 0 }}
-            />
-          </Tooltip>
-          {!isRegistered && (
-            <Typography variant="body2" sx={{ fontSize: "0.72rem", color: "#999", display: "flex", alignItems: "center", gap: 0.5 }}>
-              <LockIcon sx={{ fontSize: 12 }} />
-              Login to use AI Search
+              </span>
+            </Tooltip>
+            <Typography
+              variant="body2"
+              sx={{ fontSize: "0.8rem", color: aiEnabled && isRegistered ? "#1a1a1a" : "#aaa" }}
+            >
+              {aiEnabled && isRegistered ? "On" : "Off"}
             </Typography>
-          )}
-          {aiEnabled && searchMode && (
+            {!isRegistered && (
+              <Typography
+                variant="body2"
+                sx={{ fontSize: "0.72rem", color: "#bbb", display: "flex", alignItems: "center", gap: 0.4, ml: 0.5 }}
+              >
+                <LockIcon sx={{ fontSize: 11 }} />
+                Login to use AI Search
+              </Typography>
+            )}
+          </Box>
+
+          {/* Right: clear search results link (only visible when there are results) */}
+          {searchMode && (
             <Button
               size="small"
               variant="text"
               onClick={handleClearSearch}
-              sx={{ ml: "auto", color: "#666", fontSize: "0.72rem", textTransform: "none", py: 0 }}
+              sx={{
+                color: "#666",
+                fontSize: "0.72rem",
+                textTransform: "none",
+                py: 0,
+                minWidth: 0,
+                letterSpacing: 0,
+              }}
             >
-              ✕ Clear — show all use cases
+              × Clear — show all use cases
             </Button>
           )}
         </Box>
 
-        {/* AI search input — shown when enabled and logged in */}
-        {aiEnabled && isRegistered && (
+        {/* Search input row */}
+        {aiEnabled && isRegistered ? (
           <>
-            <Box sx={{ display: "flex", gap: 1, alignItems: "center", mt: 1 }}>
+            <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
               <TextField
                 size="small"
-                fullWidth
                 placeholder="Describe what you're looking for — e.g. 'reduce customer churn using predictive analytics'"
                 value={nlQuery}
                 onChange={(e) => setNlQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleNLSearch(); }}
                 disabled={isSearching}
+                InputProps={{
+                  endAdornment: nlQuery && !isSearching ? (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        onClick={() => { setNlQuery(""); if (searchMode) handleClearSearch(); }}
+                        sx={{ padding: "4px" }}
+                      >
+                        <ClearIcon fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ) : undefined,
+                }}
                 sx={{
+                  flex: 1,
+                  minWidth: 0,
+                  backgroundColor: "#ffffff",
+                  borderRadius: "4px",
                   "& .MuiOutlinedInput-root": {
-                    fontSize: "0.8rem",
+                    fontSize: "0.85rem",
+                    backgroundColor: "#ffffff",
                     "&.Mui-focused fieldset": { borderColor: PURE_ORANGE },
+                    ...(searchMode && { "& fieldset": { borderColor: PURE_ORANGE } }),
                   },
                 }}
               />
-              <Button
-                variant="contained"
-                onClick={handleNLSearch}
+              <Box
+                component="button"
+                onClick={!nlQuery.trim() || isSearching ? undefined : handleNLSearch}
                 disabled={!nlQuery.trim() || isSearching}
                 sx={{
-                  backgroundColor: PURE_ORANGE,
-                  color: "#fff",
-                  textTransform: "none",
+                  flexShrink: 0,
+                  border: "none",
+                  borderRadius: "4px",
+                  background: !nlQuery.trim() || isSearching
+                    ? "#b0c8e8"
+                    : PURE_ORANGE,
+                  cursor: !nlQuery.trim() || isSearching ? "default" : "pointer",
+                  px: 2.5,
+                  py: "8.5px",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: "0.72rem",
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
                   whiteSpace: "nowrap",
-                  minWidth: 120,
-                  fontSize: "0.78rem",
-                  py: "6px",
-                  boxShadow: "none",
-                  "&:hover": { backgroundColor: "#1a6bbf", boxShadow: "none" },
-                  "&.Mui-disabled": { backgroundColor: "#eee", color: "#aaa" },
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 0.75,
+                  transition: "background-color 0.15s",
+                  "&:hover": (!nlQuery.trim() || isSearching)
+                    ? {}
+                    : { backgroundColor: "#1a6bbf" },
                 }}
               >
-                {isSearching ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : "Search with AI"}
-              </Button>
+                {isSearching
+                  ? <CircularProgress size={14} sx={{ color: "#fff" }} />
+                  : "SEARCH WITH AI"}
+              </Box>
             </Box>
+
             {searchError && (
               <Alert severity="error" sx={{ mt: 1, py: 0.5, fontSize: "0.8rem" }}>{searchError}</Alert>
             )}
+
+            {/* Results summary inside card */}
             {searchMode && !isSearching && (
-              <Typography variant="body2" sx={{ mt: 0.75, color: "#666", fontSize: "0.72rem" }}>
+              <Typography variant="body2" sx={{ color: "#555", fontSize: "0.72rem", mt: 0.75 }}>
                 ✓ {searchResults.length} semantic matches — ranked by relevance, AI explanations in "Why Matched"
               </Typography>
             )}
           </>
-        )}
-
-        {/* Keyword search — shown when AI is toggled off OR user is not logged in */}
-        {(!aiEnabled || !isRegistered) && (
-          <Box sx={{ mt: 1 }}>
-            <TextField
-              size="small"
-              fullWidth
-              placeholder="Search across all columns — e.g. 'contract', 'finance', 'NLP'"
-              value={globalFilter}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" sx={{ color: "#aaa" }} />
-                  </InputAdornment>
-                ),
-                endAdornment: globalFilter && (
-                  <InputAdornment position="end">
-                    <IconButton size="small" onClick={() => setGlobalFilter("")} sx={{ padding: "4px" }}>
-                      <ClearIcon fontSize="small" />
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              }}
-              sx={{
-                "& .MuiOutlinedInput-root": {
-                  fontSize: "0.8rem",
-                  "&.Mui-focused fieldset": { borderColor: "#bbb" },
-                },
-              }}
-            />
-          </Box>
+        ) : (
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Search across all columns — e.g. 'contract', 'finance', 'NLP'"
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" sx={{ color: "#aaa" }} />
+                </InputAdornment>
+              ),
+              endAdornment: globalFilter && (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setGlobalFilter("")} sx={{ padding: "4px" }}>
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+            sx={{
+              backgroundColor: "#ffffff",
+              borderRadius: "4px",
+              "& .MuiOutlinedInput-root": {
+                fontSize: "0.8rem",
+                backgroundColor: "#ffffff",
+                "&.Mui-focused fieldset": { borderColor: PURE_ORANGE },
+              },
+            }}
+          />
         )}
       </Box>
 
+      {/* Below-card row: match count + clear all filters */}
       <Box
         sx={{
           display: "flex",
@@ -1072,10 +1139,10 @@ export default function UseCaseTable({
       >
         <Typography
           variant="body2"
-          sx={{ color: "#666", fontSize: "0.8rem", fontWeight: 500, whiteSpace: "nowrap" }}
+          sx={{ color: "#444", fontSize: "0.8rem", fontWeight: 500, whiteSpace: "nowrap" }}
         >
           {searchMode
-            ? `${searchResults.length} results`
+            ? `${searchResults.length} AI matches`
             : filteredData.length === data.length
               ? `${data.length} use cases`
               : `${filteredData.length} of ${data.length} use cases`}
@@ -1084,22 +1151,20 @@ export default function UseCaseTable({
         <Box sx={{ flex: 1 }} />
 
         <Button
-          variant="outlined"
+          variant="text"
           size="small"
-          startIcon={<ClearIcon />}
+          startIcon={<ClearIcon fontSize="small" />}
           onClick={handleClearAllFilters}
-          disabled={!hasActiveFilters}
+          disabled={!hasActiveFilters && !searchMode}
           sx={{
-            color: PURE_ORANGE,
-            borderColor: PURE_ORANGE,
-            "&:hover": {
-              borderColor: "#1a6bbf",
-              backgroundColor: "#fff5f2",
-            },
-            "&.Mui-disabled": {
-              color: "grey.400",
-              borderColor: "grey.300",
-            },
+            color: hasActiveFilters || searchMode ? "#666" : "grey.400",
+            fontSize: "0.72rem",
+            fontWeight: 600,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            py: 0.25,
+            "&:hover": { backgroundColor: "transparent", color: PURE_ORANGE },
+            "&.Mui-disabled": { color: "grey.300" },
           }}
         >
           Clear All Filters
@@ -1199,10 +1264,7 @@ export default function UseCaseTable({
             <Box
               sx={{
                 display: "grid",
-                gridTemplateColumns: `50px ${columns
-                  .slice(1)
-                  .map((col) => `${col.size || 150}px`)
-                  .join(" ")}`,
+                gridTemplateColumns: columns.map((col) => `${col.size || 150}px`).join(" "),
                 position: "sticky",
                 top: 0,
                 zIndex: 10,
@@ -1275,10 +1337,7 @@ export default function UseCaseTable({
                     ref={rowVirtualizer.measureElement}
                     sx={{
                       display: "grid",
-                      gridTemplateColumns: `50px ${columns
-                        .slice(1)
-                        .map((col) => `${col.size || 150}px`)
-                        .join(" ")}`,
+                      gridTemplateColumns: columns.map((col) => `${col.size || 150}px`).join(" "),
                       position: "absolute",
                       top: 0,
                       left: 0,
