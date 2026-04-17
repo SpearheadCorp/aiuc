@@ -13,7 +13,6 @@
     "embeddings:industry": "node lambda/generate-embeddings-industry-local.mjs"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "^3.1030.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^5.18.0",
@@ -46,6 +45,7 @@
     "yaml": ">=2.8.3",
     "flatted": ">=3.4.2",
     "picomatch": ">=4.0.4",
-    "rollup": ">=4.60.1"
+    "rollup": ">=4.60.1",
+    "fast-xml-parser": ">=5.5.9"
   }
 }
