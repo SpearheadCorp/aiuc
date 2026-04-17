@@ -23,10 +23,10 @@ import { ENABLE_AI_SEARCH } from "./ai_toggle.mjs";
  * @param {import("@aws-sdk/client-s3").S3Client} opts.s3Client
  * @param {string}   opts.bucket               - S3 bucket containing the embeddings file
  * @param {string}   opts.embeddingsKey        - S3 key for use-case embeddings JSON
- * @param {import("@aws-sdk/client-bedrock-runtime").BedrockRuntimeClient} opts.bedrockClient
+ * @param {import("openai").OpenAI} opts.openaiClient
  * @returns {Promise<{ results: Array<{ useCase: object, score: number, whyMatched: string }> }>}
  */
-export async function handleUseCaseSearch({ query, limit, s3Client, bucket, embeddingsKey, bedrockClient }) {
+export async function handleUseCaseSearch({ query, limit, s3Client, bucket, embeddingsKey, openaiClient }) {
     const queryText = query.trim().slice(0, 1000);
     const safeLimit = Math.min(Math.max(1, Number(limit) || 10), 15);
 
@@ -37,7 +37,7 @@ export async function handleUseCaseSearch({ query, limit, s3Client, bucket, embe
 
     if (ENABLE_AI_SEARCH) {
         try {
-            const queryVec = await getEmbedding(queryText, bedrockClient);
+            const queryVec = await getEmbedding(queryText, openaiClient);
             results = runVectorSearch(index, meta, queryVec, safeLimit);
             searchMode = "vector";
         } catch (err) {
@@ -55,7 +55,7 @@ export async function handleUseCaseSearch({ query, limit, s3Client, bucket, embe
         queryText,
         useCases,
         uc => `"${uc.ai_use_case || ""}" — ${uc.business_function || ""} / ${uc.business_capability || ""}: ${uc.action_implementation || ""}`,
-        bedrockClient
+        openaiClient
     );
 
     console.log(`[Search] mode=${searchMode} results=${results.length} query="${queryText.slice(0, 60)}"`);
@@ -77,10 +77,10 @@ export async function handleUseCaseSearch({ query, limit, s3Client, bucket, embe
  * @param {import("@aws-sdk/client-s3").S3Client} opts.s3Client
  * @param {string}   opts.bucket                  - S3 bucket containing the embeddings file
  * @param {string}   opts.industryEmbeddingsKey   - S3 key for industry embeddings JSON
- * @param {import("@aws-sdk/client-bedrock-runtime").BedrockRuntimeClient} opts.bedrockClient
+ * @param {import("openai").OpenAI} opts.openaiClient
  * @returns {Promise<{ results: Array<{ item: object, score: number, whyMatched: string }> }>}
  */
-export async function handleIndustrySearch({ query, limit, s3Client, bucket, industryEmbeddingsKey, bedrockClient }) {
+export async function handleIndustrySearch({ query, limit, s3Client, bucket, industryEmbeddingsKey, openaiClient }) {
     const queryText = query.trim().slice(0, 1000);
     const safeLimit = Math.min(Math.max(1, Number(limit) || 10), 15);
 
@@ -91,7 +91,7 @@ export async function handleIndustrySearch({ query, limit, s3Client, bucket, ind
 
     if (ENABLE_AI_SEARCH) {
         try {
-            const queryVec = await getEmbedding(queryText, bedrockClient);
+            const queryVec = await getEmbedding(queryText, openaiClient);
             results = runVectorSearch(index, meta, queryVec, safeLimit);
             searchMode = "vector";
         } catch (err) {
@@ -109,7 +109,7 @@ export async function handleIndustrySearch({ query, limit, s3Client, bucket, ind
         queryText,
         items,
         item => `"${item.ai_use_case || ""}" — ${item.industry || ""} / ${item.business_function || ""}: ${item.description || ""}`,
-        bedrockClient
+        openaiClient
     );
 
     console.log(`[IndustrySearch] mode=${searchMode} results=${results.length} query="${queryText.slice(0, 60)}"`);

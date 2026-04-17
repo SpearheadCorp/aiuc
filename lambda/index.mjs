@@ -1,6 +1,6 @@
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
-import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
+import OpenAI from "openai";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { handleUseCaseSearch, handleIndustrySearch } from "./core/api_handlers.mjs";
 
@@ -9,10 +9,12 @@ const REGION = process.env.S3_REGION || "us-east-2";
 
 const s3 = new S3Client({ region: REGION });
 const secretsManager = new SecretsManagerClient({ region: REGION });
-const bedrockRuntime = new BedrockRuntimeClient({ region: REGION });
 
 // ── Environment config ────────────────────────────────────────────────────────
 const BUCKET = process.env.BUCKET_NAME;
+if (!BUCKET) {
+    console.error("[Config] BUCKET_NAME environment variable is not set — S3 calls will fail.");
+}
 const DIST_PREFIX = process.env.DIST_PREFIX;
 const OKTA_ISSUER = process.env.OKTA_ISSUER || "";
 const OKTA_AUDIENCE = process.env.OKTA_AUDIENCE || "api://default";
@@ -21,13 +23,13 @@ const BASE_PATH = (process.env.BASE_PATH || "").replace(/\/$/, "");
 
 // S3 keys for pre-computed embeddings (PureStorage-specific paths).
 // Override via Lambda env vars to point at a different bucket location.
-const USE_CASES_EMBEDDINGS_KEY = process.env.USE_CASES_EMBEDDINGS_KEY || "use_cases_embeddings.json";
-const INDUSTRY_EMBEDDINGS_KEY  = process.env.INDUSTRY_EMBEDDINGS_KEY  || "industry_use_cases_embeddings.json";
+const USE_CASES_EMBEDDINGS_KEY = process.env.USE_CASES_EMBEDDINGS_KEY || "pure_use_cases_embeddings.json";
+const INDUSTRY_EMBEDDINGS_KEY  = process.env.INDUSTRY_EMBEDDINGS_KEY  || "pure_industry_use_cases_embeddings.json";
 
 // ── Search rate limiting ──────────────────────────────────────────────────────
-// Sliding-window rate limit applied to /api/search* to protect Bedrock costs.
+// Sliding-window rate limit applied to /api/search* to protect OpenAI costs.
 // Combined with Lambda reserved concurrency (set in AWS console/CLI) for a
-// hard cap on parallel Bedrock invocations.
+// hard cap on parallel OpenAI invocations.
 //
 // Tune via Lambda env vars:
 //   SEARCH_RATE_LIMIT_MAX        — max requests per window per user (default: 10)
@@ -138,16 +140,46 @@ async function requireAuth(event) {
     }
 }
 
-// ── Secrets Manager (Okta client ID — PureStorage-specific) ──────────────────
-let cachedOktaClientId = null;
+// ── Secrets Manager ───────────────────────────────────────────────────────────
+// Both OKTA_CLIENT_ID and EVERPURE_OPENAI_API_KEY are read from the same
+// secret so Everpure only needs to manage a single Secrets Manager entry.
+// Expected secret JSON shape:
+//   { "OKTA_CLIENT_ID": "...", "EVERPURE_OPENAI_API_KEY": "sk-..." }
+let cachedSecrets = null;
 
-async function getOktaClientId() {
-    if (cachedOktaClientId) return cachedOktaClientId;
+async function getSecrets() {
+    if (cachedSecrets) return cachedSecrets;
     const command = new GetSecretValueCommand({ SecretId: AIUC_SECRET_NAME });
     const response = await secretsManager.send(command);
-    const secret = JSON.parse(response.SecretString);
-    cachedOktaClientId = secret.OKTA_CLIENT_ID;
-    return cachedOktaClientId;
+    cachedSecrets = JSON.parse(response.SecretString);
+    return cachedSecrets;
+}
+
+async function getOktaClientId() {
+    const secrets = await getSecrets();
+    return secrets.OKTA_CLIENT_ID;
+}
+
+// OpenAI client — lazy-initialised after the secret is fetched.
+// Key lookup order:
+//   1. EVERPURE_OPENAI_API_KEY in Secrets Manager (production path)
+//   2. OPENAI_API_KEY in Secrets Manager (generic fallback)
+//   3. OPENAI_API_KEY env var (local dev only)
+let cachedOpenaiClient = null;
+
+async function getOpenAIClient() {
+    if (cachedOpenaiClient) return cachedOpenaiClient;
+    let apiKey;
+    if (AIUC_SECRET_NAME) {
+        const secrets = await getSecrets();
+        apiKey = secrets.EVERPURE_OPENAI_API_KEY || secrets.OPENAI_API_KEY;
+    }
+    if (!apiKey) {
+        apiKey = process.env.OPENAI_API_KEY;
+    }
+    if (!apiKey) throw new Error("OpenAI API key not found in Secrets Manager or OPENAI_API_KEY env var");
+    cachedOpenaiClient = new OpenAI({ apiKey });
+    return cachedOpenaiClient;
 }
 
 // ── S3 static file serving ────────────────────────────────────────────────────
@@ -185,7 +217,7 @@ async function getS3Object(key, contentType, cacheControl) {
     } catch (err) {
         if (err.name === "NoSuchKey") {
             if (!key.includes(".")) return getS3Object(`${DIST_PREFIX}/index.html`, "text/html");
-            return json(404, { error: "Not found", key });
+            return json(404, { error: "Not found" });
         }
         console.error("[S3] error:", err);
         return json(500, { error: "Internal server error" });
@@ -279,7 +311,7 @@ export async function handler(event) {
                 s3Client: s3,
                 bucket: BUCKET,
                 embeddingsKey: USE_CASES_EMBEDDINGS_KEY,
-                bedrockClient: bedrockRuntime,
+                openaiClient: await getOpenAIClient(),
             });
             return json(200, result);
         } catch (err) {
@@ -324,7 +356,7 @@ export async function handler(event) {
                 s3Client: s3,
                 bucket: BUCKET,
                 industryEmbeddingsKey: INDUSTRY_EMBEDDINGS_KEY,
-                bedrockClient: bedrockRuntime,
+                openaiClient: await getOpenAIClient(),
             });
             return json(200, result);
         } catch (err) {

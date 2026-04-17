@@ -113,7 +113,7 @@ export function runVectorSearch(index, meta, queryVec, topK) {
 
 /**
  * Keyword fallback: score items by term-frequency across specified fields.
- * Used when ENABLE_AI_SEARCH=false or when Bedrock embedding fails.
+ * Used when ENABLE_AI_SEARCH=false or when OpenAI embedding fails.
  *
  * @param {string} query - User query string
  * @param {object[]} items - Dataset items to search through

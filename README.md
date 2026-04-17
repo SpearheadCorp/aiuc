@@ -1,819 +1,714 @@
-<p align="center">
-  <img src="public/assets/purelogo.png" alt="Pure Storage" width="300" />
-</p>
+# AI Use Case Repository (AIUC)
 
-<h1 align="center">AI Use Case Repository (AIUC)</h1>
+A React + TypeScript SPA backed by a single AWS Lambda function that lets authenticated employees browse, filter, and semantically search an internal library of AI use cases. Users type a natural-language sentence or paragraph; the system embeds the query with OpenAI, runs cosine-similarity search against pre-computed use-case vectors, and returns the most relevant results along with a concise "Why Matched" explanation for each one.
 
-An internal, employee-only React dashboard for browsing AI use cases and industry-specific AI implementation records. Protected by Okta OIDC authentication and served via AWS Lambda + S3. Features semantic AI search powered by Amazon Bedrock embeddings and vector similarity, with AI-generated explanations for every result.
-
-## Key Features
-
-- **Secure Okta OIDC login** (PKCE flow) — no unauthenticated access
-- **Use Case table** and **Industry data table** with multi-column filtering, sorting, and virtual scrolling
-- **AI-powered semantic search** — query in plain English; Amazon Bedrock Titan embeds your query, finds the closest matches across 1 024-dimension vectors, and Bedrock Nova Lite explains why each result matched
-- **Industry AI search** — same RAG pipeline applied to industry-specific records
-- **Keyword fallback search** — automatic degradation when Bedrock is unavailable
-- **Contact button** — opens a Gmail compose tab directly in the browser
-- **Fully serverless** — one AWS Lambda function serves the React app, all API routes, and the vector search pipeline
+Deployed at: **Everpure (PureStorage)** — authentication via Okta, AI via OpenAI, infra on AWS (Lambda + S3).
 
 ---
 
 ## Table of Contents
 
-1. [Tech Stack](#tech-stack)
-2. [Prerequisites](#prerequisites)
-3. [Local Development](#local-development)
-4. [Environment Variables](#environment-variables)
-5. [Architecture Overview](#architecture-overview)
-6. [AI / RAG Search — How It Works](#ai--rag-search--how-it-works)
-7. [Generating Embeddings](#generating-embeddings)
-8. [API Endpoints](#api-endpoints)
-9. [AWS Lambda Deployment](#aws-lambda-deployment)
-10. [GitHub Actions CI/CD](#github-actions-cicd)
-11. [Available Scripts](#available-scripts)
-12. [Directory Structure](#directory-structure)
-13. [Troubleshooting](#troubleshooting)
+1. [Key Features](#key-features)
+2. [Tech Stack](#tech-stack)
+3. [Prerequisites](#prerequisites)
+4. [Getting Started — Local Development](#getting-started--local-development)
+5. [Architecture](#architecture)
+6. [OpenAI Embedding Pipeline](#openai-embedding-pipeline)
+7. [Environment Variables Reference](#environment-variables-reference)
+8. [Available Scripts](#available-scripts)
+9. [Deployment](#deployment)
+   - [Step 1 — Generate & Upload Embeddings](#step-1--generate--upload-embeddings)
+   - [Step 2 — Build & Upload Frontend](#step-2--build--upload-frontend)
+   - [Step 3 — Package & Deploy Lambda](#step-3--package--deploy-lambda)
+   - [Step 4 — AWS Secrets Manager](#step-4--aws-secrets-manager)
+   - [Step 5 — Lambda Environment Variables](#step-5--lambda-environment-variables)
+   - [CI/CD via GitHub Actions](#cicd-via-github-actions)
+10. [AI Search Feature Flag](#ai-search-feature-flag)
+11. [Rate Limiting](#rate-limiting)
+12. [Troubleshooting](#troubleshooting)
+
+---
+
+## Key Features
+
+- **Semantic AI Search** — type a sentence or full paragraph; the system finds the most relevant use cases by meaning, not just keywords.
+- **"Why Matched" column** — each result includes a 1–2 sentence AI-generated explanation of why it matched the query.
+- **Two datasets** — "Case Study" (PureStorage-specific use cases) and "Industry Data" (cross-industry use cases), each with independent AI search.
+- **AI toggle flag** — `ENABLE_AI_SEARCH=false` falls back to keyword search with no UI change, useful for cost control or if the OpenAI key is unavailable.
+- **Okta PKCE authentication** — all data endpoints require a valid Okta JWT; the Okta config is fetched dynamically at runtime, not baked into the build.
+- **Virtualized tables** — TanStack React Table + React Virtual handle large datasets smoothly without pagination.
+- **Per-user rate limiting** — sliding-window limit on `/api/search*` protects OpenAI costs.
+- **Shared Lambda core** — both the Everpure and Spearhead deployments import from the same `lambda/core/` module; only auth, branding, and data configs differ.
 
 ---
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
+|---|---|
 | **Frontend** | React 19, TypeScript 5.9, Vite 7 |
-| **UI** | Material UI (MUI) 5, Emotion |
-| **Routing** | React Router 7 |
-| **Tables** | TanStack React Table + React Virtual |
-| **Auth** | Okta OIDC (`@okta/okta-react`, `@okta/okta-auth-js`) |
+| **UI** | Material UI (MUI) v5, Emotion |
+| **Tables** | TanStack React Table v8 + React Virtual v3 |
+| **Auth** | Okta PKCE (`@okta/okta-react`, `@okta/okta-auth-js`) |
 | **Backend** | AWS Lambda (Node.js 20, ESM) |
-| **Storage** | AWS S3 (static assets + JSON data + pre-computed embeddings) |
-| **Secrets** | AWS Secrets Manager (Okta Client ID) |
-| **Embeddings Model** | Amazon Bedrock — Titan Text Embeddings v2 (`amazon.titan-embed-text-v2:0`, 1 024-dim) |
-| **Explanation Model** | Amazon Bedrock — Nova Lite (`amazon.nova-lite-v1:0`) |
-| **Vector Index** | Custom in-memory FlatIP index (cosine similarity on L2-normalised vectors) |
-| **JWT Verification** | `jose` library |
-| **Build Tool** | Vite (frontend), plain Node.js (Lambda) |
-| **CI/CD** | GitHub Actions |
+| **Static hosting** | AWS S3 (Lambda serves `dist/` from S3) |
+| **JWT verification** | `jose` (JWKS, RS256) |
+| **AI Embeddings** | OpenAI `text-embedding-3-small` (1536 dimensions) |
+| **AI Explanations** | OpenAI `gpt-4o-mini` |
+| **Vector search** | Pure-JS cosine similarity (FlatIP index, in-memory) |
+| **Secrets** | AWS Secrets Manager |
+| **CI/CD** | GitHub Actions (`.github/workflows/deploy.yml`) |
 
 ---
 
 ## Prerequisites
 
-Install these before starting:
+Make sure you have these installed before starting:
 
-- **Node.js 20+** — [https://nodejs.org](https://nodejs.org)
-- **npm 10+** — comes with Node.js
-- **AWS CLI** configured with credentials that have access to Lambda, S3, Secrets Manager, and Bedrock — [install guide](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
-- **Okta developer account** (or org account) — for authentication
-- **AWS account** with Amazon Bedrock access enabled in your region (needed for embedding generation and live search)
+- **Node.js 20+** — `node --version`
+- **npm 10+** — included with Node.js
+- **AWS CLI** — for S3 uploads and Lambda deploys (`aws --version`)
+- **An OpenAI API key** — needed only for generating embeddings locally and for the local dev server AI search. In production the key comes from Secrets Manager.
+- **An Okta developer account** — for local auth testing. The app fetches Okta config from `/api/okta-config` at runtime.
 
 ---
 
-## Local Development
+## Getting Started — Local Development
 
-Local dev uses a **two-server setup**:
-
-| Server | Command | Port | Purpose |
-|--------|---------|------|---------|
-| Vite dev server | `npm run dev` | `5173` | Serves frontend with hot reload |
-| Local API server | `npm run dev:server` | `3001` | Mirrors all Lambda API routes including search |
-
-Vite proxies all `/api/*` requests to the local API server on port 3001.
-
-### Step 1 — Clone and Install
+### 1. Clone the repository
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/YOUR_ORG/aiuc.git
 cd aiuc
+```
+
+### 2. Install dependencies
+
+```bash
+# Root (frontend + dev tools)
 npm install
+
+# Lambda (backend runtime dependencies)
 cd lambda && npm install && cd ..
 ```
 
-### Step 2 — Create `.env.local`
+### 3. Configure environment variables
 
-Create a `.env.local` file in the project root (this file is gitignored):
+```bash
+cp .env.example .env.local
+```
+
+Open `.env.local` and fill in:
 
 ```env
-# ── Okta ──────────────────────────────────────────────────────────────────────
-VITE_OKTA_ISSUER=https://YOUR_OKTA_DOMAIN/oauth2/default
-VITE_OKTA_CLIENT_ID=YOUR_OKTA_CLIENT_ID
+# Okta — get these from your Okta admin or AWS Secrets Manager
+VITE_OKTA_ISSUER=https://YOUR_OKTA_DOMAIN.okta.com/oauth2/default
+VITE_OKTA_CLIENT_ID=0oaXXXXXXXXXXXXXXXXX
 
-# ── AWS / Bedrock ─────────────────────────────────────────────────────────────
-AWS_REGION=us-east-2
-# AWS credentials are picked up automatically from ~/.aws/credentials or env vars:
-# AWS_ACCESS_KEY_ID=...
-# AWS_SECRET_ACCESS_KEY=...
+# OpenAI — local dev only (production uses Secrets Manager)
+# Note: use OPENAI_API_KEY_N, not OPENAI_API_KEY, to avoid conflict with
+# any system-level key you may already have set in your shell.
+OPENAI_API_KEY_N=sk-proj-...
 
-# ── AI Search feature flag ────────────────────────────────────────────────────
-ENABLE_AI_SEARCH=true        # set to false to force keyword-only search
-
-# ── API proxy target ──────────────────────────────────────────────────────────
+# Vite dev proxy target
 VITE_API_BASE_URL=http://localhost:3001
 ```
 
-> `VITE_OKTA_ISSUER` and `VITE_OKTA_CLIENT_ID` come from your Okta app settings.
-> AWS credentials for Bedrock are read from your local AWS config — no hard-coded keys needed.
+> **Why `OPENAI_API_KEY_N`?** If your machine already has `OPENAI_API_KEY` set as a system environment variable (e.g., from another project), the `.env.local` loader would skip it because the key already exists in the process environment. Using a unique name (`OPENAI_API_KEY_N`) guarantees the correct key is always picked up from `.env.local` regardless of what is set system-wide.
 
-### Step 3 — Add `localhost` as Okta Redirect URI
+### 4. Generate embeddings (first time only)
 
-In your Okta Admin Console:
+`use_cases.json` and `industry_use_cases.json` are already committed in `public/data/` — you don't need to create or copy them anywhere. What you do need to generate are the **embedding files** (vectors computed from that data), which are gitignored due to their size:
 
-1. Go to **Applications → Your App → General**
-2. Under **Sign-in redirect URIs**, add:
-   ```
-   http://localhost:5173/login/callback
-   ```
-3. Under **Sign-out redirect URIs**, add:
-   ```
-   http://localhost:5173
-   ```
-4. Save changes.
-
-### Step 4 — Add Local JSON Data Files
-
-The data tables load from `/api/data/use-cases` and `/api/data/industry`. In local dev, the API server reads from local JSON files:
-
-```
-local-data/
-├── use_cases.json
-└── industry_use_cases.json
+```bash
+npm run embeddings          # → public/data/pure_use_cases_embeddings.json
+npm run embeddings:industry # → public/data/pure_industry_use_cases_embeddings.json
 ```
 
-Create the `local-data/` folder in the project root and place your JSON data files there. If files are missing the tables render empty — auth and search flows still work.
+Each script reads `.env.local` automatically, so no shell env var setup is needed. Re-run only when the source JSON data changes.
 
-The search endpoints also require the pre-computed embeddings files. Copy them into `local-data/` as well (or generate them — see [Generating Embeddings](#generating-embeddings)):
+> See [OpenAI Embedding Pipeline](#openai-embedding-pipeline) for a full explanation of what these files are and why they exist.
 
-```
-local-data/
-├── use_cases.json
-├── industry_use_cases.json
-├── use_cases_embeddings.json           ← required for AI search
-└── industry_use_cases_embeddings.json  ← required for industry AI search
-```
+### 5. Start development servers (two terminals)
 
-### Step 5 — Start Both Servers
+**Terminal 1 — Local API server (port 3001):**
 
-**Terminal 1 — API server (start this first):**
-
-```cmd
+```bash
 npm run dev:server
 ```
 
-Expected output:
+You should see:
+
 ```
 ✓ Loaded .env.local
 ✓ Local API server running at http://localhost:3001
-  Okta issuer  : https://trial-xxx.okta.com/oauth2/default
-  Okta clientId: 0oa...
+  Okta issuer  : https://trial-XXXXXXX.okta.com/oauth2/default
+  Okta clientId: 0oaXXXXXXXXXXXXXXXXX
   AI search    : enabled
 
 Ready — waiting for Vite proxy requests...
 ```
 
-**Terminal 2 — Vite frontend:**
+**Terminal 2 — Vite dev server (port 5173):**
 
-```cmd
+```bash
 npm run dev
 ```
 
-Expected output:
-```
-  VITE v7.x.x  ready in xxx ms
-  ➜  Local:   http://localhost:5173/
-```
+Open [http://localhost:5173](http://localhost:5173). You will be redirected to Okta for login.
 
-### Step 6 — Open in Browser
-
-Go to **http://localhost:5173** — you will be redirected to Okta to sign in, then land on the dashboard. Use the **AI Search** toggle in either table to try semantic search.
+> The Vite server proxies all `/api/*` requests to `localhost:3001`, so you get the same API behaviour as production without deploying anything.
 
 ---
 
-## Environment Variables
+## Architecture
 
-### Frontend (build-time, in `.env.local`)
+### Directory structure
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `VITE_OKTA_ISSUER` | Local dev only | — | Okta issuer URL (e.g. `https://company.okta.com/oauth2/default`) |
-| `VITE_OKTA_CLIENT_ID` | Local dev only | — | Okta app Client ID |
-| `VITE_API_BASE_URL` | Local dev only | — | API server URL for Vite proxy — set to `http://localhost:3001` |
-| `VITE_CONTACT_EMAIL` | No | `aiuc@purestorage.com` | Contact email shown in the UI |
-| `VITE_EMAIL_TOOLTIP_TEXT` | No | `I'm interested — contact me` | Tooltip on the email icon |
-| `VITE_BASE_PATH` | No | `/` | Base URL path — only set for sub-path deployments (e.g. `/app/aiuc`) |
-
-> In production, `VITE_OKTA_ISSUER` and `VITE_OKTA_CLIENT_ID` are **not** needed as frontend env vars. The Lambda fetches them securely from AWS Secrets Manager at runtime via `/api/okta-config`.
-
-### Lambda (AWS Lambda Console → Configuration → Environment Variables)
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `BUCKET_NAME` | Yes | — | S3 bucket name (e.g. `auic`) |
-| `S3_REGION` | Yes | — | AWS region (e.g. `us-east-2`) |
-| `DIST_PREFIX` | Yes | — | S3 key prefix for frontend files (e.g. `dist`) |
-| `OKTA_ISSUER` | Yes | — | Okta issuer URL |
-| `OKTA_AUDIENCE` | No | `api://default` | Expected JWT audience |
-| `AIUC_SECRET_NAME` | Yes | — | Secrets Manager secret name (e.g. `aiuc/okta`) |
-| `ENABLE_AI_SEARCH` | No | `true` | Set to `false` to disable Bedrock and use keyword-only search |
-| `CONTACT_EMAIL` | No | `aiuc@purestorage.com` | Destination address shown in contact button |
-| `BASE_PATH` | No | — | Sub-path prefix (e.g. `/app/aiuc`) — sub-path deployments only |
-
-### AWS Secrets Manager Secret (`aiuc/okta`)
-
-Create this secret with the following JSON value:
-
-```json
-{
-  "OKTA_CLIENT_ID": "your_okta_client_id_here"
-}
+```
+aiuc/
+├── src/                          # React frontend
+│   ├── main.tsx                  # Entry point — initialises Okta dynamically
+│   ├── App.tsx                   # Root layout: header, tabs, footer
+│   ├── types.ts                  # TypeScript interfaces (UseCaseData, IndustryData)
+│   ├── theme.ts                  # MUI theme + brand colours
+│   ├── components/
+│   │   ├── UseCaseTable.tsx      # Case Study tab — table + AI search bar
+│   │   ├── IndustryDataTable.tsx # Industry Data tab — table + AI search bar
+│   │   ├── ContactDialog.tsx     # "Request Info" modal (opens Gmail compose)
+│   │   └── Logo.tsx              # Accessible logo with fallback text
+│   ├── hooks/
+│   │   ├── useS3Data.ts          # Fetches both datasets on mount (JWT-authenticated)
+│   │   ├── useAISearch.ts        # POST /api/search — use case semantic search
+│   │   ├── useIndustrySearch.ts  # POST /api/search/industry — industry semantic search
+│   │   └── useOktaUser.ts        # Extracts user name + email from Okta auth state
+│   └── config/
+│       └── okta.ts               # Fetches /api/okta-config then builds OktaAuth instance
+│
+├── lambda/                       # AWS Lambda backend (Node.js 20, ESM)
+│   ├── index.mjs                 # Main handler — routes all requests
+│   ├── core/                     # Shared module (Everpure + Spearhead both import this)
+│   │   ├── embeddings.mjs        # OpenAI text-embedding-3-small wrapper
+│   │   ├── why_matched.mjs       # OpenAI gpt-4o-mini "Why Matched" generation
+│   │   ├── search.mjs            # FlatIP index, vector search, keyword fallback
+│   │   ├── api_handlers.mjs      # Route logic for /api/search and /api/search/industry
+│   │   └── ai_toggle.mjs         # ENABLE_AI_SEARCH feature flag
+│   ├── local-server.mjs          # Dev server that mirrors Lambda (reads local files)
+│   ├── generate-embeddings-local.mjs          # Generate use case embeddings
+│   ├── generate-embeddings-industry-local.mjs # Generate industry embeddings
+│   ├── clean-for-lambda.mjs      # Strips unused deps before zipping
+│   └── package.json              # Lambda-only dependencies
+│
+├── public/data/                  # Data files
+│   ├── use_cases.json                           # Already in repo — source of truth
+│   ├── industry_use_cases.json                  # Already in repo — source of truth
+│   ├── pure_use_cases_embeddings.json           # Generated locally, gitignored
+│   └── pure_industry_use_cases_embeddings.json  # Generated locally, gitignored
+│
+├── .github/workflows/deploy.yml  # CI/CD — builds, syncs S3, deploys Lambda
+├── .env.example                  # Environment variable reference (committed)
+├── .env.local                    # Your local values (gitignored — never commit)
+└── vite.config.ts                # Vite config — proxies /api/* to localhost:3001
 ```
 
----
+### API routes
 
-## Architecture Overview
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/health` | None | Health check for uptime monitors |
+| `GET` | `/api/okta-config` | None | Returns Okta issuer + clientId from Secrets Manager |
+| `GET` | `/api/data/use-cases` | JWT | Reads `use_cases.json` from S3 |
+| `GET` | `/api/data/industry` | JWT | Reads `industry_use_cases.json` from S3 |
+| `POST` | `/api/search` | JWT + rate limit | Semantic search over use cases |
+| `POST` | `/api/search/industry` | JWT + rate limit | Semantic search over industry use cases |
+| `GET` | `/*` | None | Serves `dist/index.html` or static assets from S3 |
+
+### Request flow
 
 ```
 Browser
   │
-  ├── Local Dev ──────────────────────────────────────────────────────────────
-  │     Vite (port 5173) ──proxy /api/*──► local-server.mjs (port 3001)
-  │                                           reads .env.local
-  │                                           calls Bedrock for search
+  ├─ GET /api/okta-config  ──────────────────► Lambda (no auth)
+  │                                              └─ Reads OKTA_CLIENT_ID from Secrets Manager
+  │                                              └─ Returns { issuer, clientId }
   │
-  └── Production ─────────────────────────────────────────────────────────────
-        Lambda Function URL
-          ├── GET  /                        → Serves dist/index.html from S3
-          ├── GET  /assets/*                → Serves static assets from S3
-          ├── GET  /api/okta-config         → Secrets Manager → { issuer, clientId }
-          ├── GET  /api/data/use-cases      → Verify JWT → S3 use_cases.json
-          ├── GET  /api/data/industry       → Verify JWT → S3 industry_use_cases.json
-          ├── POST /api/search              → Verify JWT → Bedrock embed → vector search → Nova Lite
-          └── POST /api/search/industry     → Verify JWT → Bedrock embed → vector search → Nova Lite
+  ├─ Okta PKCE login (redirect) ─────────────► Okta IdP
+  │                                              └─ Returns access_token (JWT, RS256)
+  │
+  ├─ GET /api/data/use-cases ────────────────► Lambda (JWT required)
+  │   Authorization: Bearer <token>              └─ Verifies token against Okta JWKS
+  │                                              └─ Reads use_cases.json from S3
+  │
+  └─ POST /api/search ───────────────────────► Lambda (JWT + rate limit)
+      { "query": "automate invoice processing" } └─ Fetches OpenAI key from Secrets Manager
+                                                 └─ Embeds query via OpenAI (1536-dim)
+                                                 └─ Loads pure_use_cases_embeddings.json from S3
+                                                 └─ Cosine similarity search (FlatIP index)
+                                                 └─ Generates "Why Matched" via gpt-4o-mini
+                                                 └─ Returns top-K results + explanations
 ```
 
-### Okta Authentication Flow
+### Authentication flow
+
+1. Frontend loads → calls `GET /api/okta-config` (unauthenticated).
+2. Lambda reads `OKTA_CLIENT_ID` from AWS Secrets Manager and returns `{ issuer, clientId }`.
+3. Frontend initialises `OktaAuth` with these values — not baked in at build time, so the Okta config can change without a rebuild.
+4. Unauthenticated users are redirected to Okta login via PKCE.
+5. After login, all API calls include `Authorization: Bearer <access_token>`.
+6. Lambda verifies the JWT signature on every request using Okta's JWKS endpoint (RS256).
+
+### Shared core module
+
+`lambda/core/` is the single source of truth for all RAG logic. Both the Everpure Lambda and the Spearhead Lambda import from `core/` — never duplicating the embedding, search, or explanation code. Only deployment-specific things differ: auth provider, branding, S3 bucket, and embedding file names.
 
 ```
-1. App loads → fetches /api/okta-config (issuer + clientId from Secrets Manager)
-2. Okta SDK initialized with PKCE
-3. User not authenticated → redirect to Okta login page
-4. User logs in → Okta redirects to /login/callback
-5. PKCE code exchange → access token stored in browser session
-6. All /api/* requests include: Authorization: Bearer <access_token>
-7. Lambda verifies token signature using Okta JWKS (RS256, pinned)
-8. Verified → request proceeds; invalid token → 401 Unauthorized
-```
-
-### S3 Bucket Layout (Production)
-
-```
-s3://your-bucket/
-├── dist/                                   ← Built React app (uploaded by CI/CD)
-│   ├── index.html
-│   └── assets/
-│       ├── index-[hash].js
-│       └── index-[hash].css
-├── use_cases.json                          ← Use case data (upload manually)
-├── industry_use_cases.json                 ← Industry data (upload manually)
-├── use_cases_embeddings.json               ← Pre-computed vectors (upload after generation)
-└── industry_use_cases_embeddings.json      ← Pre-computed vectors (upload after generation)
+lambda/index.mjs (Everpure)    ──┐
+                                  ├──► lambda/core/ (shared RAG + search logic)
+spearhead/index.mjs (Spearhead) ──┘
 ```
 
 ---
 
-## AI / RAG Search — How It Works
+## OpenAI Embedding Pipeline
 
-AIUC implements a **Retrieval-Augmented Generation (RAG)** pipeline for both the Use Case and Industry tables. Here is the complete end-to-end flow:
+### What embeddings are and why we need them
 
-### 1. Offline: Embedding Generation
+Standard keyword search matches exact words. If a user types *"reduce manual effort in accounts payable"*, keyword search won't find a use case titled *"Invoice Automation"* unless the same words appear. Semantic/vector search fixes this by converting both the query and every use case into a high-dimensional numeric vector (an "embedding") where **meaning determines proximity**, not exact words.
 
-Before the search feature can work, each record in `use_cases.json` and `industry_use_cases.json` must be converted into a numeric vector using Amazon Bedrock Titan Text Embeddings v2.
+We use **OpenAI `text-embedding-3-small`** — a 1536-dimension model. Each use case record is converted into a 1536-number vector and stored in a JSON file on S3. At search time, the user's query is embedded on the fly, then compared against all stored vectors using cosine similarity. The closest matches are returned.
 
-This is a **one-time offline step** that you run locally whenever the data changes. The scripts concatenate the most informative fields of each record into a single text string, call the Bedrock embedding API, and write the resulting 1 024-dimension vectors alongside the original records to a new JSON file.
+### Why we pre-compute embeddings offline
 
-See [Generating Embeddings](#generating-embeddings) for the exact commands.
+Embedding every use case at search time would be extremely slow and expensive. Instead, we embed them **once locally** and upload the result to S3. The Lambda loads this file into memory on first request and caches it for the lifetime of the container — subsequent searches are near-instant.
 
-### 2. Storage
+### Why the files are named `pure_*`
 
-The generated embedding files are stored in S3 alongside the raw data JSON. The Lambda loads them once per cold start and keeps them in memory for the lifetime of the execution environment — so there is no per-request S3 read overhead after the first call.
+Both the Everpure (PureStorage) and Spearhead deployments may share the same S3 bucket. The `pure_` prefix namespaces Everpure's embedding files so they never overwrite Spearhead's files:
 
-### 3. Query Time: Vector Search
+| S3 file | Deployment | Model |
+|---|---|---|
+| `pure_use_cases_embeddings.json` | Everpure | OpenAI `text-embedding-3-small` (1536-dim) |
+| `pure_industry_use_cases_embeddings.json` | Everpure | OpenAI `text-embedding-3-small` (1536-dim) |
+| `use_cases_embeddings.json` | Spearhead | AWS Bedrock Titan (different vector space) |
+| `industry_use_cases_embeddings.json` | Spearhead | AWS Bedrock Titan (different vector space) |
 
-When a user types a query and clicks **Search** with the AI Search toggle on:
+> **Important:** Everpure uses OpenAI embeddings; Spearhead uses AWS Bedrock Titan. These live in completely different vector spaces — you cannot mix files between deployments even if dimensions happen to match. Always regenerate from scratch if you switch models.
+
+### Why OpenAI instead of Bedrock for Everpure
+
+Everpure's infosec team has not officially approved AWS Bedrock. OpenAI APIs are approved and the key is stored securely in AWS Secrets Manager under `EVERPURE_OPENAI_API_KEY`. Spearhead continues to use Bedrock since it is already approved for that deployment.
+
+### How "Why Matched" works
+
+After the vector search returns the top-K results, the Lambda makes **a single `gpt-4o-mini` call** with all results in one prompt. It asks the model to write 1–2 sentences for each result explaining specifically why it matches the query. The response is parsed as a JSON array and attached to each result before returning to the frontend.
 
 ```
-User query
-    │
-    ▼ POST /api/search  (Bearer token)
-    │
-    ▼ Lambda
-    ├── Verify Okta JWT
-    ├── Load embeddings from S3 (cached in memory)
-    ├── Call Bedrock Titan to embed the query → 1 024-dim vector
-    ├── Compute cosine similarity against every stored vector (FlatIP index)
-    ├── Return top-K results (default 10, max 15) with similarity score
-    └── For each result, call Bedrock Nova Lite:
-            "In one sentence, why does this record match the query?"
-    │
-    ▼ JSON response
-    [
-      { "useCase": { ...fields }, "score": 0.87, "whyMatched": "This record focuses on..." },
-      ...
-    ]
-    │
-    ▼ Frontend hook (useAISearch / useIndustrySearch)
-    └── Renders results with score badge + "Why Matched" column
+Query: "automate invoice processing"
+           │
+           ├─ OpenAI embedding → [0.021, -0.041, ...] (1536 dims)
+           │
+           ├─ Cosine similarity vs all pre-computed use-case vectors
+           │
+           ├─ Top 10 results selected
+           │
+           └─ Single gpt-4o-mini call:
+                "For each of the following 10 use cases, write 1-2 sentences
+                 explaining why it matches the query..."
+                  └─ Returns JSON array of 10 explanations
 ```
 
-### 4. Fallback: Keyword Search
+### Step-by-step: generating embedding files locally
 
-If Bedrock is unavailable (throttled, network error) or `ENABLE_AI_SEARCH=false`, the search endpoint automatically falls back to a **keyword search**: it splits the query into terms, counts how many fields each record matches, and returns results sorted by match count. The Nova Lite explanations are still generated for keyword results.
-
-### 5. Frontend UI
-
-In `UseCaseTable` and `IndustryDataTable` there is an **AI Search** toggle button (state persisted to `localStorage`).
-
-- **Toggle off** — standard multi-column filter view
-- **Toggle on** — shows a text input and **Search** button; results appear in a scored list with a **Why Matched** column
-
----
-
-## Generating Embeddings
-
-Run these scripts whenever your source data changes. You need AWS credentials with Bedrock access in the region where Titan is available.
-
-### Use Case Embeddings
+**Prerequisites:** `OPENAI_API_KEY_N` set in `.env.local`.
 
 ```bash
-# From the project root
-node lambda/generate-embeddings-local.mjs
+# Generate use case embeddings
+npm run embeddings
 ```
-
-- **Reads**: `public/data/use_cases.json`
-- **Writes**: `public/data/use_cases_embeddings.json`
-- **Fields embedded**: `ai_use_case`, `business_function`, `business_capability`, `action_implementation`, `expected_outcomes`, `stakeholder`, `ai_tools_models`, `datasets`
-- **Model**: `amazon.titan-embed-text-v2:0` (1 024 dimensions, L2-normalised)
-- Includes automatic retry with exponential backoff for Bedrock throttling
 
 Expected output:
-```
-Generating embeddings for 250 use cases...
-[1/250] Embedded: "Predictive maintenance for storage arrays"
-[2/250] Embedded: "Automated capacity planning"
-...
-✓ Done. Written to public/data/use_cases_embeddings.json
-```
 
-### Industry Use Case Embeddings
+```
+✓ Loaded .env.local
+Model:      text-embedding-3-small (1536 dimensions)
+Output:     .../public/data/pure_use_cases_embeddings.json
+
+Generating embeddings for 87 use cases…
+
+  [ 10/87] done
+  [ 20/87] done
+  ...
+  [ 87/87] done
+
+✓ 87 embeddings (2.1 MB) → public/data/pure_use_cases_embeddings.json
+
+Upload to S3:
+  aws s3 cp public/data/pure_use_cases_embeddings.json s3://YOUR_BUCKET/pure_use_cases_embeddings.json
+```
 
 ```bash
-node lambda/generate-embeddings-industry-local.mjs
+# Generate industry use case embeddings
+npm run embeddings:industry
+# → public/data/pure_industry_use_cases_embeddings.json
 ```
 
-- **Reads**: `public/data/industry_use_cases.json`
-- **Writes**: `public/data/industry_use_cases_embeddings.json`
-- **Fields embedded**: `ai_use_case`, `industry`, `business_function`, `business_capability`, `description`, `implementation_plan`, `expected_outcomes`, `stakeholders`, `ai_tools_platforms`, `datasets`
-
-### Upload Embeddings to S3
-
-After generating, upload both files to your S3 bucket so Lambda can load them:
-
-```bash
-aws s3 cp public/data/use_cases_embeddings.json \
-    s3://YOUR_BUCKET_NAME/use_cases_embeddings.json \
-    --region YOUR_REGION
-
-aws s3 cp public/data/industry_use_cases_embeddings.json \
-    s3://YOUR_BUCKET_NAME/industry_use_cases_embeddings.json \
-    --region YOUR_REGION
-```
-
-> The embedding files are large (~10–15 MB each). Do **not** commit them to git — they are listed in `.gitignore`. Always regenerate from source and upload directly to S3.
-
-### Embeddings File Format
-
-Each file is a JSON array. Every element contains the original record and its 1 024-dimension vector:
+**What each record in the embedding file looks like:**
 
 ```json
 [
   {
     "useCase": {
-      "id": 1,
-      "ai_use_case": "Predictive maintenance for storage arrays",
-      ...
+      "ai_use_case": "Invoice Automation",
+      "business_function": "Finance",
+      "business_capability": "Accounts Payable",
+      "action_implementation": "Use ML to extract and process invoice data...",
+      "...": "..."
     },
-    "embedding": [0.0231, -0.0184, 0.0412, ...]
-  },
-  ...
+    "embedding": [0.0231, -0.0418, 0.0872, "..."]
+  }
 ]
 ```
 
----
+**When to regenerate:**
 
-## API Endpoints
-
-| Method | Path | Auth | Description |
-|--------|------|:----:|-------------|
-| `GET` | `/api/okta-config` | No | Returns Okta `issuer` and `clientId` |
-| `GET` | `/api/data/use-cases` | JWT | Returns use case JSON array from S3 |
-| `GET` | `/api/data/industry` | JWT | Returns industry data JSON array from S3 |
-| `POST` | `/api/search` | JWT | AI vector search over use cases |
-| `POST` | `/api/search/industry` | JWT | AI vector search over industry records |
-| `GET` | `/*` | No | Serves static files from S3 `dist/` |
-
-### `POST /api/search` — Request Body
-
-```json
-{
-  "query": "machine learning for storage capacity forecasting"
-}
-```
-
-### `POST /api/search` — Success Response
-
-```json
-[
-  {
-    "useCase": {
-      "id": 42,
-      "Business Function": "IT Operations",
-      "AI Use Case": "Predictive Capacity Planning",
-      "Expected Outcomes and Results": "Reduce over-provisioning by 30%",
-      "..."
-    },
-    "score": 0.891,
-    "whyMatched": "This use case applies ML to forecast storage capacity needs, directly matching the query about capacity forecasting."
-  },
-  ...
-]
-```
-
-### `POST /api/search/industry` — Request Body
-
-```json
-{
-  "query": "AI fraud detection in financial services"
-}
-```
-
-Response shape is the same as `/api/search` but the `useCase` field contains industry record fields (`Industry`, `Description`, `Implementation Plan`, etc.).
+- `use_cases.json` or `industry_use_cases.json` data changes (new records, edited fields).
+- You switch embedding models (any model change = incompatible vector space = must regenerate everything).
+- Old Bedrock Titan (1024-dim) files are in S3 — these are **not compatible** with OpenAI vectors even if you try to reuse them.
 
 ---
 
-## AWS Lambda Deployment
+## Environment Variables Reference
 
-> For first-time infrastructure setup (Lambda function creation, S3 bucket policy, IAM role, Secrets Manager, Function URL), see **[DEPLOYMENT_CONFIG.md](./DEPLOYMENT_CONFIG.md)**.
+### `.env.local` — local development only (never commit)
 
-### IAM Permissions Required for AI Search
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_OKTA_ISSUER` | Yes | Okta OAuth2 issuer URL |
+| `VITE_OKTA_CLIENT_ID` | Yes | Okta OIDC client ID |
+| `VITE_API_BASE_URL` | Yes | Vite proxy target — set to `http://localhost:3001` |
+| `OPENAI_API_KEY_N` | For AI search | OpenAI API key for local embedding generation and dev server AI search |
 
-The Lambda execution role needs the following additional permissions for Bedrock:
+### Lambda runtime — set in AWS Lambda Console
+
+| Variable | Default | Description |
+|---|---|---|
+| `BUCKET_NAME` | _(required)_ | S3 bucket name |
+| `S3_REGION` | `us-east-2` | AWS region for S3 and Secrets Manager |
+| `DIST_PREFIX` | `dist` | S3 key prefix where the frontend `dist/` is uploaded |
+| `AIUC_SECRET_NAME` | _(required)_ | Secrets Manager secret name |
+| `OKTA_ISSUER` | _(required)_ | Okta issuer URL for JWT verification |
+| `OKTA_AUDIENCE` | `api://default` | Expected JWT audience claim |
+| `USE_CASES_EMBEDDINGS_KEY` | `pure_use_cases_embeddings.json` | S3 key for use case embeddings |
+| `INDUSTRY_EMBEDDINGS_KEY` | `pure_industry_use_cases_embeddings.json` | S3 key for industry embeddings |
+| `ENABLE_AI_SEARCH` | `true` | Set to `false` to force keyword-only search |
+| `SEARCH_RATE_LIMIT_MAX` | `10` | Max search requests per user per window |
+| `SEARCH_RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window in ms (default: 1 minute) |
+| `BASE_PATH` | _(empty)_ | Sub-path prefix if deployed behind a reverse proxy |
+
+### AWS Secrets Manager — secret JSON shape
+
+The secret named by `AIUC_SECRET_NAME` must contain:
 
 ```json
 {
-  "Effect": "Allow",
-  "Action": [
-    "bedrock:InvokeModel"
-  ],
-  "Resource": [
-    "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
-    "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0"
-  ]
+  "OKTA_CLIENT_ID": "0oaXXXXXXXXXXXXXXXXX",
+  "EVERPURE_OPENAI_API_KEY": "sk-proj-..."
 }
 ```
 
-Add this to your Lambda execution role in **IAM → Roles → Your Role → Add permissions → Create inline policy**.
-
-### 1 — Build the Frontend
-
-```cmd
-npm run build
-```
-
-For sub-path deployments (app served at e.g. `/app/aiuc`):
-
-```cmd
-set VITE_BASE_PATH=/app/aiuc && npm run build
-```
-
-Output is written to `dist/`.
-
-### 2 — Upload Frontend Assets to S3
-
-```cmd
-aws s3 sync dist/ s3://YOUR_BUCKET_NAME/dist/ --delete --region YOUR_REGION
-```
-
-### 3 — Upload Data Files (first time or when data changes)
-
-```cmd
-aws s3 cp public/data/use_cases.json s3://YOUR_BUCKET_NAME/ --region YOUR_REGION
-aws s3 cp public/data/industry_use_cases.json s3://YOUR_BUCKET_NAME/ --region YOUR_REGION
-```
-
-### 4 — Upload Embeddings (after generating or when data changes)
-
-```cmd
-aws s3 cp public/data/use_cases_embeddings.json s3://YOUR_BUCKET_NAME/ --region YOUR_REGION
-aws s3 cp public/data/industry_use_cases_embeddings.json s3://YOUR_BUCKET_NAME/ --region YOUR_REGION
-```
-
-### 5 — Package the Lambda Function
-
-```cmd
-cd lambda
-npm install --omit=dev
-```
-
-**Windows (PowerShell):**
-```powershell
-Compress-Archive -Path lambda\* -DestinationPath lambda.zip -Force
-```
-
-**Mac / Linux:**
-```bash
-cd lambda && zip -r ../lambda.zip . && cd ..
-```
-
-### 6 — Deploy Lambda Code
-
-```cmd
-aws lambda update-function-code ^
-  --function-name YOUR_LAMBDA_FUNCTION_NAME ^
-  --zip-file fileb://lambda.zip ^
-  --region YOUR_REGION
-```
-
-### 7 — Set Lambda Environment Variables
-
-In **AWS Console → Lambda → Your Function → Configuration → Environment Variables → Edit**:
-
-| Key | Example Value |
-|-----|---------------|
-| `BUCKET_NAME` | `auic` |
-| `S3_REGION` | `us-east-2` |
-| `DIST_PREFIX` | `dist` |
-| `OKTA_ISSUER` | `https://company.okta.com/oauth2/default` |
-| `OKTA_AUDIENCE` | `api://default` |
-| `AIUC_SECRET_NAME` | `aiuc/okta` |
-| `ENABLE_AI_SEARCH` | `true` |
-
-### 8 — Register Lambda URL in Okta
-
-In Okta Admin Console → **Applications → Your App → General**:
-
-- **Sign-in redirect URIs** → add:
-  ```
-  https://YOUR_LAMBDA_FUNCTION_URL/login/callback
-  ```
-- **Sign-out redirect URIs** → add:
-  ```
-  https://YOUR_LAMBDA_FUNCTION_URL/
-  ```
-
-### 9 — Verify Deployment
-
-```cmd
-curl https://YOUR_LAMBDA_FUNCTION_URL/api/okta-config
-```
-
-Expected response:
-```json
-{"issuer":"https://company.okta.com/oauth2/default","clientId":"0oa..."}
-```
-
-Test the search endpoint (requires a valid Okta token):
-
-```cmd
-curl -X POST https://YOUR_LAMBDA_FUNCTION_URL/api/search ^
-  -H "Content-Type: application/json" ^
-  -H "Authorization: Bearer YOUR_OKTA_ACCESS_TOKEN" ^
-  -d "{\"query\":\"machine learning for storage\"}"
-```
-
----
-
-## GitHub Actions CI/CD
-
-Every push to `main` automatically builds and deploys via `.github/workflows/deploy.yml`.
-
-### Required GitHub Secrets
-
-Go to **GitHub → Repo → Settings → Secrets and variables → Actions** and add:
-
-| Secret | Description |
-|--------|-------------|
-| `AWS_ACCESS_KEY_ID` | IAM user access key |
-| `AWS_SECRET_ACCESS_KEY` | IAM user secret key |
-| `AWS_REGION` | e.g. `us-east-2` |
-| `S3_BUCKET_NAME` | e.g. `auic` |
-| `LAMBDA_FUNCTION_NAME` | e.g. `dev-aiuc-frontend` |
-
-### What the Workflow Does
-
-1. Checks out code on push to `main`
-2. Installs Node.js 20 + runs `npm install`
-3. Runs `npm run build` → outputs `dist/`
-4. Syncs `dist/` to S3
-5. Packages `lambda/` as a zip
-6. Runs `aws lambda update-function-code`
-
-> Embedding files are **not** regenerated by CI/CD. Run the embedding scripts locally whenever your source data changes and upload the results to S3 manually (or add a separate manual workflow for it).
+The Lambda reads both keys from one secret on cold start and caches them in memory for the lifetime of the container.
 
 ---
 
 ## Available Scripts
 
-### Frontend
+Run from the project root:
 
 | Command | Description |
-|---------|-------------|
-| `npm run dev` | Start Vite dev server at `http://localhost:5173` |
-| `npm run dev:server` | Start local API server at `http://localhost:3001` |
-| `npm run build` | Type-check + build frontend to `dist/` |
-| `npm run preview` | Preview production build locally |
-| `npm run lint` | Run ESLint on `src/` |
+|---|---|
+| `npm run dev` | Start Vite dev server on port 5173 (proxies `/api/*` → port 3001) |
+| `npm run dev:server` | Start local Lambda-mirror API server on port 3001 |
+| `npm run build` | Type-check (`tsc -b`) then build frontend to `dist/` |
+| `npm run lint` | Run ESLint across the entire project |
+| `npm run preview` | Preview the production build locally |
+| `npm run embeddings` | Generate `public/data/pure_use_cases_embeddings.json` |
+| `npm run embeddings:industry` | Generate `public/data/pure_industry_use_cases_embeddings.json` |
 
-### Embedding Generation
+Run from the `lambda/` directory:
 
 | Command | Description |
-|---------|-------------|
-| `npm run embeddings` | Generate `use_cases_embeddings.json` via Bedrock Titan |
-| `npm run embeddings:industry` | Generate `industry_use_cases_embeddings.json` via Bedrock Titan |
-
-Or run the scripts directly from the project root:
-
-```bash
-node lambda/generate-embeddings-local.mjs
-node lambda/generate-embeddings-industry-local.mjs
-```
+|---|---|
+| `npm install --omit=dev` | Install production-only dependencies before zipping |
 
 ---
 
-## Directory Structure
+## Deployment
 
+### Step 1 — Generate & Upload Embeddings
+
+Do this whenever the data files change or when setting up a fresh environment.
+
+```bash
+# 1. Generate embedding files locally (reads OPENAI_API_KEY_N from .env.local)
+npm run embeddings
+npm run embeddings:industry
+
+# 2. Upload to S3
+#    The pure_ prefix keeps Everpure files separate from Spearhead files
+#    that may share the same bucket.
+aws s3 cp public/data/pure_use_cases_embeddings.json \
+  s3://YOUR_BUCKET_NAME/pure_use_cases_embeddings.json
+
+aws s3 cp public/data/pure_industry_use_cases_embeddings.json \
+  s3://YOUR_BUCKET_NAME/pure_industry_use_cases_embeddings.json
 ```
-aiuc/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml                          # GitHub Actions CI/CD
-├── docs/
-│   └── plans/                                  # Implementation plan docs
-├── lambda/
-│   ├── index.mjs                               # Lambda handler (routes, auth, S3, search)
-│   ├── local-server.mjs                        # Local dev API server (mirrors Lambda)
-│   ├── generate-embeddings-local.mjs           # Bedrock Titan embedding gen — use cases
-│   ├── generate-embeddings-industry-local.mjs  # Bedrock Titan embedding gen — industry
-│   ├── package.json
-│   └── package-lock.json
-├── local-data/                                 # (gitignored) local JSON data files for dev
-│   ├── use_cases.json
-│   ├── industry_use_cases.json
-│   ├── use_cases_embeddings.json
-│   └── industry_use_cases_embeddings.json
-├── public/
-│   ├── assets/
-│   │   ├── purelogo.png
-│   │   └── spearhead.png
-│   └── data/                                   # Source data and generated embeddings
-│       ├── use_cases.json
-│       ├── industry_use_cases.json
-│       ├── use_cases_embeddings.json           # Generated — do not commit
-│       └── industry_use_cases_embeddings.json  # Generated — do not commit
-├── src/
-│   ├── components/
-│   │   ├── ContactDialog.tsx                   # Contact button (opens Gmail compose)
-│   │   ├── IndustryDataTable.tsx               # Industry table with filters + AI search
-│   │   ├── UseCaseTable.tsx                    # Use case table with filters + AI search
-│   │   └── Logo.tsx
-│   ├── config/
-│   │   └── okta.ts                             # Okta SDK initialization
-│   ├── hooks/
-│   │   ├── useAISearch.ts                      # Vector search hook — use cases
-│   │   ├── useIndustrySearch.ts                # Vector search hook — industry
-│   │   ├── useOktaUser.ts                      # Extract user info from Okta token
-│   │   └── useS3Data.ts                        # Fetch + map raw data from API
-│   ├── App.tsx                                 # Main dashboard (tabs, layout)
-│   ├── main.tsx                                # Entry point, Okta Security wrapper
-│   ├── theme.ts                                # MUI theme (Pure Storage branding)
-│   ├── types.ts                                # TypeScript interfaces
-│   ├── utils.ts
-│   └── globals.css
-├── .env.local                                  # (gitignored) local env vars
-├── .gitignore
-├── index.html
-├── vite.config.ts
-├── tsconfig.json
-├── package.json
-├── README.md
-└── DEPLOYMENT_CONFIG.md                        # Detailed AWS infrastructure setup guide
+
+> These files are 1–3 MB each and are **not committed to git**. Always regenerate from the source JSON files when data changes.
+
+### Step 2 — Build & Upload Frontend
+
+```bash
+# Build the React frontend
+npm run build
+
+# Sync dist/ to S3 (--delete removes files that no longer exist locally)
+aws s3 sync dist/ s3://YOUR_BUCKET_NAME/dist/ --delete
+
+# Upload source data files (not the embeddings — those are handled in Step 1)
+aws s3 cp public/data/use_cases.json s3://YOUR_BUCKET_NAME/use_cases.json
+aws s3 cp public/data/industry_use_cases.json s3://YOUR_BUCKET_NAME/industry_use_cases.json
 ```
+
+### Step 3 — Package & Deploy Lambda
+
+```bash
+cd lambda
+
+# 1. Install production dependencies only
+npm install --omit=dev
+
+# 2. Strip packages already provided by the Lambda Node.js 20 runtime.
+#    AWS SDK v3 (@aws-sdk/* + @smithy/*) ships built-in — bundling it wastes ~18 MB.
+rm -rf node_modules/@aws-sdk
+rm -rf node_modules/@smithy
+rm -rf node_modules/@aws-crypto
+rm -rf node_modules/@types
+rm -rf node_modules/@googleapis
+rm -rf node_modules/@xenova
+rm -rf node_modules/@huggingface
+
+# 3. Create the zip.
+#    IMPORTANT: include core/ — index.mjs imports from ./core/api_handlers.mjs etc.
+#    Without core/ the Lambda will throw a module-not-found error on every invocation.
+zip -r ../lambda.zip index.mjs package.json core/ node_modules/
+
+cd ..
+
+# 4. Check size (should be ~4 MB)
+du -sh lambda.zip
+
+# 5. Upload and deploy
+aws s3 cp lambda.zip s3://YOUR_BUCKET_NAME/deployments/lambda.zip
+
+aws lambda update-function-code \
+  --function-name YOUR_LAMBDA_FUNCTION_NAME \
+  --s3-bucket YOUR_BUCKET_NAME \
+  --s3-key deployments/lambda.zip
+```
+
+Expected zip size: **~4 MB** (jose + openai packages, core/ modules, handler).
+
+### Step 4 — AWS Secrets Manager
+
+The Lambda reads both the Okta client ID and the OpenAI API key from a **single** Secrets Manager secret, so you only need to manage one secret entry.
+
+**One-time setup:**
+
+1. Go to **AWS Secrets Manager → Store a new secret**.
+2. Choose **Other type of secret** → **Plaintext** tab.
+3. Paste this JSON (replacing placeholder values):
+
+```json
+{
+  "OKTA_CLIENT_ID": "0oaXXXXXXXXXXXXXXXXX",
+  "EVERPURE_OPENAI_API_KEY": "sk-proj-..."
+}
+```
+
+4. Give the secret a name, e.g. `aiuc/everpure`.
+5. Finish and save.
+
+**IAM permission:** The Lambda's execution role needs:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "secretsmanager:GetSecretValue",
+  "Resource": "arn:aws:secretsmanager:us-east-2:YOUR_ACCOUNT_ID:secret:aiuc/everpure-*"
+}
+```
+
+> **Why Secrets Manager instead of Lambda env vars?** Lambda env vars are visible in plain text to anyone with `lambda:GetFunctionConfiguration` IAM permission. Secrets Manager encrypts values at rest with KMS, provides fine-grained IAM access control, and enables key rotation without redeployment.
+
+### Step 5 — Lambda Environment Variables
+
+Set these in **AWS Lambda Console → Configuration → Environment variables**:
+
+| Key | Value |
+|---|---|
+| `BUCKET_NAME` | Your S3 bucket name |
+| `S3_REGION` | `us-east-2` (or your region) |
+| `DIST_PREFIX` | `dist` |
+| `AIUC_SECRET_NAME` | `aiuc/everpure` |
+| `OKTA_ISSUER` | `https://YOUR_OKTA_DOMAIN.okta.com/oauth2/default` |
+| `OKTA_AUDIENCE` | `api://default` |
+| `USE_CASES_EMBEDDINGS_KEY` | `pure_use_cases_embeddings.json` |
+| `INDUSTRY_EMBEDDINGS_KEY` | `pure_industry_use_cases_embeddings.json` |
+| `ENABLE_AI_SEARCH` | `true` |
+
+### CI/CD via GitHub Actions
+
+Pushing to `main` automatically triggers `.github/workflows/deploy.yml` which:
+
+1. Installs root dependencies and builds the frontend (`npm run build`).
+2. Syncs `dist/` to S3.
+3. Uploads `use_cases.json`, `industry_use_cases.json`, and any `pure_*_embeddings.json` files found in `public/data/`.
+4. Installs Lambda production deps, strips the bundled AWS SDK (provided by the Lambda runtime), zips `index.mjs + package.json + core/ + node_modules/`, uploads to S3, and calls `update-function-code`.
+
+**Required GitHub Secrets** (Settings → Secrets → Actions):
+
+| Secret | Description |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | IAM user access key |
+| `AWS_SECRET_ACCESS_KEY` | IAM user secret key |
+| `AWS_REGION` | e.g. `us-east-2` |
+| `S3_BUCKET_NAME` | S3 bucket name |
+| `LAMBDA_FUNCTION_NAME` | Lambda function name |
+
+> **Embeddings are not auto-generated in CI.** The `pure_*_embeddings.json` files must already exist in `public/data/` before CI runs (generated locally and committed, or already uploaded to S3 separately). Since each file can be 1–3 MB, many teams generate them once after a data change and upload directly rather than committing to git.
+
+---
+
+## AI Search Feature Flag
+
+The `ENABLE_AI_SEARCH` Lambda environment variable controls whether semantic search is active:
+
+| Value | Behaviour |
+|---|---|
+| `true` (default) | Vector embedding search + "Why Matched" explanations via OpenAI |
+| `false` | Keyword term-frequency search only, no OpenAI calls, no cost |
+
+When set to `false`:
+- No OpenAI API calls are made — zero cost.
+- The UI search bar still works — results are returned by keyword matching across all text fields.
+- No code changes or redeployment needed — just update the env var and the Lambda picks it up on the next cold start.
+
+This flag is useful for:
+- Cost control during non-critical periods.
+- Incident response if OpenAI has an outage.
+- Environments where AI has not yet been approved (deploy with `false`, enable when ready).
+
+---
+
+## Rate Limiting
+
+The `/api/search` and `/api/search/industry` endpoints enforce a per-user sliding-window rate limit to protect OpenAI costs.
+
+**Defaults:** 10 requests per user per 60 seconds.
+
+- Keyed on the `sub` (subject) claim from the verified JWT — one limit per Okta user identity.
+- When exceeded: `HTTP 429` with a `Retry-After` header (seconds until the window clears).
+- The frontend surfaces the retry delay in the UI error message.
+- Tune via Lambda env vars: `SEARCH_RATE_LIMIT_MAX` and `SEARCH_RATE_LIMIT_WINDOW_MS`.
+
+> **Note:** The rate limit store is in-memory per Lambda container. If AWS scales to multiple concurrent containers, each has its own store. For a hard global cap, set **Lambda reserved concurrency** in the AWS console — this limits the total number of parallel Lambda executions.
 
 ---
 
 ## Troubleshooting
 
-### `ECONNREFUSED` on `/api/okta-config`
+### AI search returns "Search failed. Please try again."
 
-**Cause:** Local API server is not running.
+Check CloudWatch logs for the Lambda. Common causes:
 
-**Fix:** Open a second terminal and run:
-```cmd
-npm run dev:server
+**1. OpenAI key not found:**
+```
+Error: OpenAI API key not found in Secrets Manager or OPENAI_API_KEY env var
+```
+→ Verify `AIUC_SECRET_NAME` is set correctly and the secret JSON contains `EVERPURE_OPENAI_API_KEY`.
+
+**2. Lambda can't reach Secrets Manager:**
+→ Check the Lambda IAM execution role has `secretsmanager:GetSecretValue` permission on the secret ARN.
+
+**3. Embeddings file not found in S3:**
+```
+[SearchIndex] empty or invalid embeddings at s3://BUCKET/pure_use_cases_embeddings.json
+```
+→ Run `npm run embeddings` locally and upload the file (see [Step 1](#step-1--generate--upload-embeddings)).
+
+**4. Dimension mismatch / wrong model:**
+→ Old Bedrock Titan (1024-dim) files were uploaded instead of OpenAI (1536-dim) ones. Regenerate using `npm run embeddings`.
+
+---
+
+### Local dev server fails — "OPENAI_API_KEY_N is not set"
+
+Ensure `.env.local` contains:
+```
+OPENAI_API_KEY_N=sk-proj-...
+```
+The scripts read `.env.local` automatically — no shell export needed.
+
+---
+
+### Local dev server starts but AI search returns 503
+
+The embeddings files don't exist in `public/data/`. Run:
+```bash
+npm run embeddings
+npm run embeddings:industry
 ```
 
 ---
 
-### `Failed to load authentication configuration` in UI
+### Frontend shows "Failed to load authentication configuration"
 
-**Cause:** `VITE_OKTA_ISSUER` or `VITE_OKTA_CLIENT_ID` is missing from `.env.local`, or Vite was not restarted after editing the file.
+The `/api/okta-config` call failed.
 
-**Fix:**
-1. Confirm both values are set in `.env.local`
-2. Stop and restart both servers
+**Local dev:** Ensure `npm run dev:server` is running on port 3001 and `VITE_OKTA_ISSUER` / `VITE_OKTA_CLIENT_ID` are set in `.env.local`.
 
----
-
-### Okta `400 Bad Request — redirect_uri not allowed`
-
-**Cause:** `http://localhost:5173/login/callback` not in Okta app's allowed redirect URIs.
-
-**Fix:** Okta Admin → **Applications → Your App → General → Sign-in redirect URIs** → add `http://localhost:5173/login/callback`.
+**Production:** Check `AIUC_SECRET_NAME` is set in Lambda env vars and the Secrets Manager secret exists with `OKTA_CLIENT_ID`.
 
 ---
 
-### Okta `403 access_denied`
+### Lambda zip is too large (> 50 MB)
 
-**Cause:** App is in Testing mode and your account is not a test user.
-
-**Fix:** Okta Admin → **Applications → Your App → Assignments** → assign your user.
-
----
-
-### AI Search returns no results / falls back to keyword search
-
-**Cause:** Bedrock is not reachable — missing credentials, wrong region, or model not enabled.
-
-**Fix:**
-1. Confirm your AWS credentials have Bedrock `InvokeModel` permission for Titan and Nova Lite
-2. Make sure Bedrock model access is **enabled** in the AWS Console: **Bedrock → Model access → Manage model access** → enable `amazon.titan-embed-text-v2:0` and `amazon.nova-lite-v1:0`
-3. Check that `AWS_REGION` in `.env.local` matches the region where you enabled models
-4. Run a direct Bedrock test:
-   ```bash
-   aws bedrock-runtime invoke-model \
-     --model-id amazon.titan-embed-text-v2:0 \
-     --body '{"inputText":"test"}' \
-     --cli-binary-format raw-in-base64-out \
-     output.json --region us-east-2
-   ```
-
----
-
-### AI Search endpoint returns `500 — embeddings not loaded`
-
-**Cause:** The embedding JSON files are missing from S3 (or `local-data/` in dev).
-
-**Fix:**
-1. Run the embedding generation scripts (see [Generating Embeddings](#generating-embeddings))
-2. Upload the output files to S3
-3. In local dev, copy the files to `local-data/`
-
----
-
-### Embedding generation script fails with throttling errors
-
-**Cause:** Bedrock Titan has per-minute request limits and you are hitting them.
-
-**Fix:** The scripts include automatic retry with exponential backoff — they will handle this automatically. If the failure is persistent, reduce the concurrency by adding a `--delay` flag (or wait a few minutes and re-run — the script is safe to restart; existing embeddings are overwritten).
-
----
-
-### `Cannot find package 'googleapis'` or `@aws-sdk/*`
-
-**Cause:** Running `node local-server.mjs` directly from the root. Dependencies live in `lambda/node_modules`.
-
-**Fix:** Always use the npm script from the project root:
-```cmd
-npm run dev:server
+Run the cleanup script before zipping:
+```bash
+cd lambda
+npm install --omit=dev
+rm -rf node_modules/@aws-sdk node_modules/@smithy node_modules/@aws-crypto
+rm -rf node_modules/@types node_modules/@googleapis node_modules/@xenova node_modules/@huggingface
+zip -r ../lambda.zip index.mjs package.json core/ node_modules/
 ```
+Expected final size: ~4 MB. If still large, check for unexpected packages in `lambda/node_modules/`.
 
 ---
 
-### Data tables show empty in local dev
+### Data changes not reflected after deployment
 
-**Cause:** `local-data/use_cases.json` or `local-data/industry_use_cases.json` missing.
-
-**Fix:** Create `local-data/` in the project root and add your JSON files. See `src/hooks/useS3Data.ts` for the expected data shape (snake_case keys).
-
----
-
-### Lambda search endpoint returns `403` or `401`
-
-**Cause:** The Okta JWT sent in `Authorization: Bearer` is expired or the Lambda's `OKTA_ISSUER` / `OKTA_AUDIENCE` doesn't match.
-
-**Fix:**
-1. Refresh your Okta session in the browser (log out and log back in)
-2. Verify `OKTA_ISSUER` in Lambda env vars matches `VITE_OKTA_ISSUER` used at build time
-3. Verify `OKTA_AUDIENCE` is `api://default` (or whatever your Okta authorization server uses)
+The Lambda caches the search index in memory for the lifetime of the container. After uploading new embedding files or data files to S3:
+- Either wait for the Lambda container to recycle (happens automatically after a period of inactivity), or
+- Force a cold start by deploying a new version: `aws lambda update-function-code ...`
 
 ---
 
-For detailed AWS infrastructure setup (first-time Lambda function creation, S3 bucket policy, IAM role, Secrets Manager, Function URL configuration), see **[DEPLOYMENT_CONFIG.md](./DEPLOYMENT_CONFIG.md)**.
+### Rate limit hit during local testing
+
+The local dev server (`local-server.mjs`) does **not** enforce rate limits — they only apply to the Lambda. You can make unlimited search requests locally.
+
+---
+
+### Okta token expired mid-session
+
+The `useOktaAuth` hook handles token refresh automatically via Okta's silent renew mechanism. If you see 401 errors, try signing out and back in via the Okta redirect.

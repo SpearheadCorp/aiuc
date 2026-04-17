@@ -1,33 +1,30 @@
 /**
  * core/why_matched.mjs
- * "Why Matched" explanation generation using Amazon Bedrock Nova Lite.
+ * "Why Matched" explanation generation using OpenAI gpt-4o-mini.
  *
  * Both PureStorage and Spearhead import from this module — do NOT duplicate
  * this logic in client-specific Lambda handlers.
  *
- * Model: us.amazon.nova-lite-v1:0  (fast, cost-effective text generation on Bedrock)
- * IAM required: bedrock:InvokeModel on us.amazon.nova-lite-v1:0
+ * Model: gpt-4o-mini  (fast, cost-effective text generation via OpenAI)
+ * Requires: OPENAI_API_KEY environment variable
  */
 
-import { InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
-
-export const WHY_MATCHED_MODEL = "us.amazon.nova-lite-v1:0";
+export const WHY_MATCHED_MODEL = "gpt-4o-mini";
 export const FALLBACK_WHY = "Matched based on semantic similarity to your query.";
 
 /**
  * Generate 1–2 sentence explanations for why each search result matched the query.
- * Keeps all AI inference within AWS — no external API dependencies.
  *
- * On any Bedrock error, returns the FALLBACK_WHY string for every item so that
+ * On any OpenAI error, returns the FALLBACK_WHY string for every item so that
  * search results are still returned to the caller.
  *
  * @param {string} query - The user's search query
  * @param {object[]} items - Array of data objects returned by the search
  * @param {function(object): string} formatItem - Maps one item to a descriptive string for the prompt
- * @param {import("@aws-sdk/client-bedrock-runtime").BedrockRuntimeClient} bedrockClient
+ * @param {import("openai").OpenAI} openaiClient
  * @returns {Promise<string[]>} One explanation string per item (same order as items)
  */
-export async function generateExplanations(query, items, formatItem, bedrockClient) {
+export async function generateExplanations(query, items, formatItem, openaiClient) {
     if (items.length === 0) return [];
 
     const safeQuery = query.replace(/"/g, '\\"');
@@ -45,24 +42,19 @@ Respond ONLY with a JSON array of strings, one per use case in the same order:
 ["explanation for 1", "explanation for 2", ...]`;
 
     try {
-        const command = new InvokeModelCommand({
-            modelId: WHY_MATCHED_MODEL,
-            contentType: "application/json",
-            accept: "application/json",
-            body: JSON.stringify({
-                messages: [{ role: "user", content: [{ text: prompt }] }],
-                inferenceConfig: { temperature: 0.2, maxTokens: 1024 },
-            }),
+        const response = await openaiClient.chat.completions.create({
+            model: WHY_MATCHED_MODEL,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.2,
+            max_tokens: 1024,
         });
-        const response = await bedrockClient.send(command);
-        const result = JSON.parse(Buffer.from(response.body).toString("utf-8"));
-        const text = result.output?.message?.content?.[0]?.text || "[]";
+        const text = response.choices[0]?.message?.content || "[]";
         const match = text.match(/\[[\s\S]*\]/);
         if (!match) return items.map(() => FALLBACK_WHY);
         const parsed = JSON.parse(match[0]);
         return Array.isArray(parsed) ? parsed : items.map(() => FALLBACK_WHY);
     } catch (err) {
-        console.error("[WhyMatched] Bedrock error:", err.message);
+        console.error("[WhyMatched] OpenAI error:", err.message);
         return items.map(() => FALLBACK_WHY);
     }
 }

@@ -1,45 +1,40 @@
 /**
  * core/embeddings.mjs
- * Shared embedding generation using Amazon Bedrock Titan Text Embeddings v2.
+ * Shared embedding generation using OpenAI text-embedding-3-small.
  *
  * Both PureStorage and Spearhead import from this module — do NOT duplicate
  * this logic in client-specific Lambda handlers.
  *
- * Model: amazon.titan-embed-text-v2:0  (1024-dim, L2-normalised by Bedrock)
- * IAM required: bedrock:InvokeModel on amazon.titan-embed-text-v2:0
+ * Model: text-embedding-3-small  (1536-dim)
+ * Requires: OPENAI_API_KEY environment variable
  */
 
-import { InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
-
-const EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0";
-const EMBEDDING_DIMENSIONS = 1024;
+const EMBEDDING_MODEL = "text-embedding-3-small";
+const EMBEDDING_DIMENSIONS = 1536;
 
 /**
- * Generate a 1024-dim embedding vector via Amazon Bedrock Titan Text Embeddings v2.
- * Vectors are L2-normalised by Bedrock — no post-processing required before storage.
+ * Generate a 1536-dim embedding vector via OpenAI text-embedding-3-small.
  *
- * @param {string} text - Input text to embed (max ~8192 tokens)
- * @param {import("@aws-sdk/client-bedrock-runtime").BedrockRuntimeClient} bedrockClient
- * @returns {Promise<number[]>} 1024-dim float array
- * @throws {Error} if Bedrock returns an unexpected response shape or the call fails
+ * @param {string} text - Input text to embed
+ * @param {import("openai").OpenAI} openaiClient
+ * @returns {Promise<number[]>} 1536-dim float array
+ * @throws {Error} if OpenAI returns an unexpected response shape or the call fails
  */
-export async function getEmbedding(text, bedrockClient) {
-    const command = new InvokeModelCommand({
-        modelId: EMBEDDING_MODEL_ID,
-        contentType: "application/json",
-        accept: "application/json",
-        body: JSON.stringify({ inputText: text, dimensions: EMBEDDING_DIMENSIONS, normalize: true }),
-    });
+export async function getEmbedding(text, openaiClient) {
     try {
-        const response = await bedrockClient.send(command);
-        const result = JSON.parse(Buffer.from(response.body).toString("utf-8"));
-        if (!result || !Array.isArray(result.embedding)) {
-            throw new Error(`Bedrock Titan returned unexpected response shape: ${JSON.stringify(result)?.slice(0, 200)}`);
+        const response = await openaiClient.embeddings.create({
+            model: EMBEDDING_MODEL,
+            input: text,
+            dimensions: EMBEDDING_DIMENSIONS,
+        });
+        const embedding = response.data[0]?.embedding;
+        if (!Array.isArray(embedding)) {
+            throw new Error(`OpenAI returned unexpected response shape: ${JSON.stringify(response)?.slice(0, 200)}`);
         }
-        console.log(`[Embedding] success dim=${result.embedding.length}`);
-        return result.embedding;
+        console.log(`[Embedding] success dim=${embedding.length}`);
+        return embedding;
     } catch (err) {
-        console.error("[Embedding] Bedrock error:", err.message);
+        console.error("[Embedding] OpenAI error:", err.message);
         throw err;
     }
 }

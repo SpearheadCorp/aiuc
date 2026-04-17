@@ -39,11 +39,11 @@ jobs:
         run: |
           aws s3 cp public/data/use_cases.json s3://${{ secrets.S3_BUCKET_NAME }}/use_cases.json
           aws s3 cp public/data/industry_use_cases.json s3://${{ secrets.S3_BUCKET_NAME }}/industry_use_cases.json
-          if [ -f public/data/use_cases_embeddings.json ]; then
-            aws s3 cp public/data/use_cases_embeddings.json s3://${{ secrets.S3_BUCKET_NAME }}/use_cases_embeddings.json
+          if [ -f public/data/pure_use_cases_embeddings.json ]; then
+            aws s3 cp public/data/pure_use_cases_embeddings.json s3://${{ secrets.S3_BUCKET_NAME }}/pure_use_cases_embeddings.json
           fi
-          if [ -f public/data/industry_use_cases_embeddings.json ]; then
-            aws s3 cp public/data/industry_use_cases_embeddings.json s3://${{ secrets.S3_BUCKET_NAME }}/industry_use_cases_embeddings.json
+          if [ -f public/data/pure_industry_use_cases_embeddings.json ]; then
+            aws s3 cp public/data/pure_industry_use_cases_embeddings.json s3://${{ secrets.S3_BUCKET_NAME }}/pure_industry_use_cases_embeddings.json
           fi
 
       - name: Build and deploy Lambda
@@ -71,7 +71,7 @@ jobs:
           # package.json: required so Node.js treats this as an ESM package
           # node_modules/: only jose (~460 KB) and its transitive deps remain
           # Result: zip is well under 1 MB
-          zip -r ../lambda.zip index.mjs package.json node_modules/
+          zip -r ../lambda.zip index.mjs package.json core/ node_modules/
 
           cd ..
 

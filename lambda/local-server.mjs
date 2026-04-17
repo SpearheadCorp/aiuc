@@ -6,7 +6,7 @@
  * Uses shared core/ modules for search logic (same code paths as Lambda).
  * Differences from Lambda:
  *   - Loads embeddings from local public/data/ instead of S3
- *   - Uses AWS credential profile instead of Lambda IAM role
+ *   - Reads OPENAI_API_KEY_N from .env.local instead of Secrets Manager
  *   - No auth enforcement (for dev convenience)
  */
 
@@ -14,8 +14,7 @@ import { createServer } from "http";
 import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
-import { fromIni } from "@aws-sdk/credential-provider-ini";
+import OpenAI from "openai";
 
 import { getEmbedding, l2normalize } from "./core/embeddings.mjs";
 import { createFlatIPIndex, runVectorSearch, runKeywordSearch, USE_CASE_FIELDS, INDUSTRY_FIELDS } from "./core/search.mjs";
@@ -44,23 +43,17 @@ if (existsSync(envPath)) {
   console.warn("⚠ .env.local not found — set env vars manually");
 }
 
-const BEDROCK_REGION = process.env.AWS_REGION || "us-east-2";
-
-// AWS_PROFILE must be set in .env.local — no hardcoded fallback
-const AWS_PROFILE = process.env.AWS_PROFILE;
-if (!AWS_PROFILE) {
-  console.error("✗ AWS_PROFILE is not set. Add AWS_PROFILE=<your-profile> to .env.local");
-  process.exit(1);
-}
-
 const OKTA_ISSUER    = process.env.VITE_OKTA_ISSUER    || "";
 const OKTA_CLIENT_ID = process.env.VITE_OKTA_CLIENT_ID || "";
 
-// ── Bedrock client (credential profile for local dev) ─────────────────────────
-const bedrock = new BedrockRuntimeClient({
-  region:      BEDROCK_REGION,
-  credentials: fromIni({ profile: AWS_PROFILE }),
-});
+// ── OpenAI client (uses OPENAI_API_KEY from .env.local) ──────────────────────
+const openaiApiKey = process.env.OPENAI_API_KEY_N;
+if (!openaiApiKey) {
+  console.error("✗ OPENAI_API_KEY_N is not set. Add OPENAI_API_KEY_N=sk-... to .env.local");
+  process.exit(1);
+}
+
+const openai = new OpenAI({ apiKey: openaiApiKey });
 
 // ── Local file-based search index (mirrors S3 loading in Lambda) ──────────────
 // Builds a FlatIP index from a local embeddings JSON file on first call.
@@ -163,7 +156,7 @@ createServer(async (req, res) => {
 
       if (ENABLE_AI_SEARCH) {
         try {
-          const queryVec = await getEmbedding(queryText, bedrock);
+          const queryVec = await getEmbedding(queryText, openai);
           results = runVectorSearch(index, meta, queryVec, safeLimit);
           searchMode = "vector";
         } catch (err) {
@@ -181,7 +174,7 @@ createServer(async (req, res) => {
         queryText,
         items,
         item => `"${item.ai_use_case || ""}" — ${item.industry || ""} / ${item.business_function || ""}: ${item.description || ""}`,
-        bedrock
+        openai
       );
 
       console.log(`[IndustrySearch] mode=${searchMode} "${queryText.slice(0, 60)}…" → ${results.length} results`);
@@ -222,7 +215,7 @@ createServer(async (req, res) => {
 
       if (ENABLE_AI_SEARCH) {
         try {
-          const queryVec = await getEmbedding(queryText, bedrock);
+          const queryVec = await getEmbedding(queryText, openai);
           results = runVectorSearch(index, meta, queryVec, safeLimit);
           searchMode = "vector";
         } catch (err) {
@@ -240,7 +233,7 @@ createServer(async (req, res) => {
         queryText,
         useCases,
         uc => `"${uc.ai_use_case || ""}" — ${uc.business_function || ""} / ${uc.business_capability || ""}: ${uc.action_implementation || ""}`,
-        bedrock
+        openai
       );
 
       console.log(`[Search] mode=${searchMode} "${queryText.slice(0, 60)}…" → ${results.length} results`);
