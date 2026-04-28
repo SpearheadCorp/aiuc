@@ -16,9 +16,10 @@ if (!BUCKET) {
     console.error("[Config] BUCKET_NAME environment variable is not set — S3 calls will fail.");
 }
 const DIST_PREFIX = process.env.DIST_PREFIX;
-const OKTA_ISSUER = process.env.OKTA_ISSUER || "";
-const OKTA_AUDIENCE = process.env.OKTA_AUDIENCE || "api://default";
-const AIUC_SECRET_NAME = process.env.AIUC_SECRET_NAME || "";
+const OKTA_ISSUER       = process.env.OKTA_ISSUER || "";
+const OKTA_REDIRECT_URI = process.env.OKTA_REDIRECT_URI || "";
+const OKTA_AUDIENCE     = process.env.OKTA_AUDIENCE || "api://default";
+const AIUC_SECRET_NAME  = process.env.AIUC_SECRET_NAME || "";
 const BASE_PATH = (process.env.BASE_PATH || "").replace(/\/$/, "");
 
 // S3 keys for pre-computed embeddings (PureStorage-specific paths).
@@ -123,7 +124,12 @@ function getMimeType(key) {
 // ── Auth (Okta — PureStorage-specific) ───────────────────────────────────────
 let jwks = null;
 function getJwks() {
-    if (!jwks) jwks = createRemoteJWKSet(new URL(`${OKTA_ISSUER}/v1/keys`));
+    if (!jwks) {
+        const jwksUrl = OKTA_ISSUER.includes("/oauth2/")
+            ? `${OKTA_ISSUER}/v1/keys`
+            : `${OKTA_ISSUER}/oauth2/v1/keys`;
+        jwks = createRemoteJWKSet(new URL(jwksUrl));
+    }
     return jwks;
 }
 
@@ -132,7 +138,7 @@ async function requireAuth(event) {
     if (!authHeader.startsWith("Bearer ")) return json(401, { error: "Unauthorized" });
     const token = authHeader.slice(7);
     try {
-        await jwtVerify(token, getJwks(), { issuer: OKTA_ISSUER, audience: OKTA_AUDIENCE, algorithms: ["RS256"] });
+        await jwtVerify(token, getJwks(), { issuer: OKTA_ISSUER, algorithms: ["RS256"] });
         return null;
     } catch (err) {
         console.error("[Auth] token verification failed:", err.message);
@@ -254,7 +260,7 @@ export async function handler(event) {
     if (path === "/api/okta-config" || path === "/api/okta-config/") {
         try {
             const clientId = await getOktaClientId();
-            return json(200, { issuer: OKTA_ISSUER, clientId });
+            return json(200, { issuer: OKTA_ISSUER, clientId, redirectUri: OKTA_REDIRECT_URI });
         } catch (err) {
             console.error("[OktaConfig] error:", err);
             return json(500, { error: "Failed to load authentication configuration" });
