@@ -532,20 +532,11 @@ export default function IndustryDataTable({
         meta: { headerName: "Industry" },
         size: 170,
         enableSorting: true,
-        cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          return (
-            <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
-              sx={{ width: "100%", cursor: "pointer", py: 1 }}
-            >
-              {getValue() as React.ReactNode}
-            </Box>
-          );
-        },
+        cell: ({ getValue }) => (
+          <Box sx={{ width: "100%", py: 1 }}>
+            {getValue() as React.ReactNode}
+          </Box>
+        ),
       },
       {
         accessorKey: "Business Function",
@@ -554,17 +545,11 @@ export default function IndustryDataTable({
         size: 180,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
               sx={{
                 width: "100%",
-                cursor: "pointer",
                 py: 1,
                 whiteSpace: isExpanded ? "normal" : "nowrap",
                 overflow: isExpanded ? "visible" : "hidden",
@@ -583,17 +568,11 @@ export default function IndustryDataTable({
         size: 180,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
               sx={{
                 width: "100%",
-                cursor: "pointer",
                 py: 1,
                 whiteSpace: isExpanded ? "normal" : "nowrap",
                 overflow: isExpanded ? "visible" : "hidden",
@@ -612,17 +591,11 @@ export default function IndustryDataTable({
         size: 180,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
               sx={{
                 width: "100%",
-                cursor: "pointer",
                 py: 1,
                 whiteSpace: isExpanded ? "normal" : "nowrap",
                 overflow: isExpanded ? "visible" : "hidden",
@@ -641,17 +614,11 @@ export default function IndustryDataTable({
         size: 200,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
               sx={{
                 width: "100%",
-                cursor: "pointer",
                 py: 1,
                 whiteSpace: isExpanded ? "normal" : "nowrap",
                 overflow: isExpanded ? "visible" : "hidden",
@@ -670,20 +637,14 @@ export default function IndustryDataTable({
         size: 400,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
               sx={{
                 whiteSpace: isExpanded ? "normal" : "nowrap",
                 overflow: isExpanded ? "visible" : "hidden",
                 textOverflow: "ellipsis",
                 py: 1,
-                cursor: "pointer",
               }}
             >
               {getValue() as React.ReactNode}
@@ -698,20 +659,14 @@ export default function IndustryDataTable({
         size: 400,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
               sx={{
                 whiteSpace: isExpanded ? "normal" : "nowrap",
                 overflow: isExpanded ? "visible" : "hidden",
                 textOverflow: "ellipsis",
                 py: 1,
-                cursor: "pointer",
               }}
             >
               {getValue() as React.ReactNode}
@@ -726,17 +681,11 @@ export default function IndustryDataTable({
         size: 300,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
               sx={{
                 width: "100%",
-                cursor: "pointer",
                 py: 1,
                 whiteSpace: isExpanded ? "normal" : "nowrap",
                 overflow: isExpanded ? "visible" : "hidden",
@@ -755,21 +704,10 @@ export default function IndustryDataTable({
         size: 350,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
-            <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
-              sx={{
-                display: "flex",
-                flexWrap: isExpanded ? "wrap" : "nowrap",
-                overflow: isExpanded ? "visible" : "hidden",
-              }}
-            >
-              {renderChips(getValue() as string, rowId, isExpanded)}
+            <Box sx={{ display: "flex", flexWrap: isExpanded ? "wrap" : "nowrap", overflow: isExpanded ? "visible" : "hidden" }}>
+              {renderChips(getValue() as string, row.original.Id, isExpanded)}
             </Box>
           );
         },
@@ -781,21 +719,10 @@ export default function IndustryDataTable({
         size: 300,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
-            <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
-              sx={{
-                display: "flex",
-                flexWrap: isExpanded ? "wrap" : "nowrap",
-                overflow: isExpanded ? "visible" : "hidden",
-              }}
-            >
-              {renderChips(getValue() as string, rowId, isExpanded)}
+            <Box sx={{ display: "flex", flexWrap: isExpanded ? "wrap" : "nowrap", overflow: isExpanded ? "visible" : "hidden" }}>
+              {renderChips(getValue() as string, row.original.Id, isExpanded)}
             </Box>
           );
         },
@@ -807,21 +734,10 @@ export default function IndustryDataTable({
         size: 300,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
-            <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
-              sx={{
-                display: "flex",
-                flexWrap: isExpanded ? "wrap" : "nowrap",
-                overflow: isExpanded ? "visible" : "hidden",
-              }}
-            >
-              {renderChips(getValue() as string, rowId, isExpanded)}
+            <Box sx={{ display: "flex", flexWrap: isExpanded ? "wrap" : "nowrap", overflow: isExpanded ? "visible" : "hidden" }}>
+              {renderChips(getValue() as string, row.original.Id, isExpanded)}
             </Box>
           );
         },
@@ -833,21 +749,10 @@ export default function IndustryDataTable({
         size: 300,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
-            <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
-              sx={{
-                display: "flex",
-                flexWrap: isExpanded ? "wrap" : "nowrap",
-                overflow: isExpanded ? "visible" : "hidden",
-              }}
-            >
-              {renderChips(getValue() as string, rowId, isExpanded)}
+            <Box sx={{ display: "flex", flexWrap: isExpanded ? "wrap" : "nowrap", overflow: isExpanded ? "visible" : "hidden" }}>
+              {renderChips(getValue() as string, row.original.Id, isExpanded)}
             </Box>
           );
         },
@@ -859,21 +764,10 @@ export default function IndustryDataTable({
         size: 300,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
-            <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
-              sx={{
-                display: "flex",
-                flexWrap: isExpanded ? "wrap" : "nowrap",
-                overflow: isExpanded ? "visible" : "hidden",
-              }}
-            >
-              {renderChips(getValue() as string, rowId, isExpanded)}
+            <Box sx={{ display: "flex", flexWrap: isExpanded ? "wrap" : "nowrap", overflow: isExpanded ? "visible" : "hidden" }}>
+              {renderChips(getValue() as string, row.original.Id, isExpanded)}
             </Box>
           );
         },
@@ -885,20 +779,9 @@ export default function IndustryDataTable({
         size: 300,
         enableSorting: true,
         cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
-          const isExpanded = expandedRows.has(rowId);
+          const isExpanded = expandedRows.has(row.original.Id);
           return (
-            <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
-              sx={{
-                display: "flex",
-                flexWrap: isExpanded ? "wrap" : "nowrap",
-                overflow: isExpanded ? "visible" : "hidden",
-              }}
-            >
+            <Box sx={{ display: "flex", flexWrap: isExpanded ? "wrap" : "nowrap", overflow: isExpanded ? "visible" : "hidden" }}>
               <a
                 style={{
                   textDecoration: "underline",
@@ -910,6 +793,7 @@ export default function IndustryDataTable({
                 href={getValue() as string}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
               >
                 Visit Site <OpenInNewIcon sx={{ fontSize: 12 }} />
               </a>
@@ -1385,6 +1269,7 @@ export default function IndustryDataTable({
                     key={row.id}
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
+                    onClick={() => toggleRowExpansion(row.original.Id)}
                     sx={{
                       display: "grid",
                       gridTemplateColumns: columns.map((col) => `${col.size || 150}px`).join(" "),
@@ -1396,6 +1281,7 @@ export default function IndustryDataTable({
                       backgroundColor: "#ffffff",
                       borderBottom: "1px solid #e0e0e0",
                       transition: "background-color 0.2s ease",
+                      cursor: "pointer",
                       "&:hover": {
                         backgroundColor: "#fafafa",
                       },

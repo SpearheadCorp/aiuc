@@ -359,6 +359,34 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // GET /api/data/use-cases — mirrors Lambda: reads use_cases.json from public/data/
+  if (req.method === "GET" && (url === "/api/data/use-cases" || url === "/api/data/use-cases/")) {
+    try {
+      const filePath = path.join(DATA_DIR, "use_cases.json");
+      const raw = await readFile(filePath, "utf8");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(raw);
+    } catch (err) {
+      console.error("[data/use-cases] error:", err.message);
+      send(res, 500, { error: "Failed to load use-cases data" });
+    }
+    return;
+  }
+
+  // GET /api/data/industry — mirrors Lambda: reads industry_use_cases.json from public/data/
+  if (req.method === "GET" && (url === "/api/data/industry" || url === "/api/data/industry/")) {
+    try {
+      const filePath = path.join(DATA_DIR, "industry_use_cases.json");
+      const raw = await readFile(filePath, "utf8");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(raw);
+    } catch (err) {
+      console.error("[data/industry] error:", err.message);
+      send(res, 500, { error: "Failed to load industry data" });
+    }
+    return;
+  }
+
   send(res, 404, { error: "Not found" });
 });
 

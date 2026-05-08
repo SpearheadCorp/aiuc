@@ -44,7 +44,7 @@ function App() {
     errorIndustry,
   } = useS3Data();
 
-  const TAB_NAMES = ["Case Study", "Industry Data"];
+  const TAB_NAMES = ["Case Study", "Industry Data", "How to Use"];
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
     logClick("tab", { tabName: TAB_NAMES[newValue] });
@@ -191,6 +191,7 @@ function App() {
           >
             <Tab label="Case Study" id="tab-0" aria-controls="tabpanel-0" />
             <Tab label="Industry Data" id="tab-1" aria-controls="tabpanel-1" />
+            <Tab label="How to Use" id="tab-2" aria-controls="tabpanel-2" />
           </Tabs>
         </Box>
 
@@ -211,13 +212,26 @@ function App() {
           ) : (
             <>
               {activeTab === 0 && (
-                <UseCaseTable
-                  data={useCaseData}
-                  loading={loadingUseCase}
-                  error={errorUseCase}
-                  userEmail={userEmail}
-                  isRegistered={isRegistered}
-                />
+                <>
+                  <Typography variant="body2" sx={{ mb: 1.5, color: "#555", fontSize: "0.85rem" }}>
+                    Need help getting started?{" "}
+                    <Link
+                      component="button"
+                      underline="hover"
+                      onClick={() => setActiveTab(2)}
+                      sx={{ color: PURE_ORANGE, fontWeight: 500, fontSize: "0.85rem", cursor: "pointer", verticalAlign: "baseline" }}
+                    >
+                      Visit our How to Use tab.
+                    </Link>
+                  </Typography>
+                  <UseCaseTable
+                    data={useCaseData}
+                    loading={loadingUseCase}
+                    error={errorUseCase}
+                    userEmail={userEmail}
+                    isRegistered={isRegistered}
+                  />
+                </>
               )}
               {activeTab === 1 && (
                 <IndustryDataTable
@@ -227,6 +241,75 @@ function App() {
                   userEmail={userEmail}
                   isRegistered={isRegistered}
                 />
+              )}
+              {activeTab === 2 && (
+                <Box
+                  id="tabpanel-2"
+                  role="tabpanel"
+                  sx={{ flex: 1, overflowY: "auto", px: 2, py: 2 }}
+                >
+                <Box sx={{ maxWidth: 720, mx: "auto" }}>
+                  <Typography variant="h5" sx={{ fontWeight: 700, mb: 2, color: "#1a1a1a" }}>
+                    About the AI Use Case Repository
+                  </Typography>
+                  <Typography variant="body1" sx={{ color: "#444", lineHeight: 1.8, mb: 4 }}>
+                    The <strong>AI Use Case (AIUC) Repository</strong> is an internal library of curated AI-powered
+                    use cases spanning multiple industries and business functions. It helps teams discover,
+                    explore, and evaluate relevant AI opportunities — from implementation plans and expected
+                    outcomes to the datasets, tools, and frameworks involved. Whether you're looking for
+                    inspiration or a concrete starting point, the repository surfaces real-world use cases
+                    with enough detail to accelerate your AI initiatives.
+                  </Typography>
+
+                  <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5, color: "#1a1a1a" }}>
+                    How to Navigate
+                  </Typography>
+                  <Box component="ul" sx={{ pl: 2.5, mb: 4, color: "#444", lineHeight: 2 }}>
+                    <li>Use the <strong>Case Study</strong> tab to browse AI use cases with full context.</li>
+                    <li>Use the <strong>Industry Data</strong> tab to filter and explore by industry, function, or capability.</li>
+                    <li>Click any row to expand and see detailed information.</li>
+                    <li>Use the column filter icons to narrow down results.</li>
+                    <li>Registered users unlock additional columns and AI-powered semantic search.</li>
+                  </Box>
+
+                  <Box
+                    sx={{
+                      border: `1.5px solid ${PURE_ORANGE}`,
+                      borderRadius: "8px",
+                      backgroundColor: "#fff8f5",
+                      p: 3,
+                    }}
+                  >
+                    <Typography variant="h6" sx={{ fontWeight: 700, mb: 1, color: "#1a1a1a" }}>
+                      Request Help / Express Interest
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: "#555", mb: 2, lineHeight: 1.7 }}>
+                      Have a question about a specific use case? Want to explore how AI can help your team?
+                      Reach out — we'd love to help you get started.
+                    </Typography>
+                    <Link
+                      href={`mailto:${APP_CONFIG.contactEmail}`}
+                      underline="none"
+                      sx={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 0.75,
+                        backgroundColor: PURE_ORANGE,
+                        color: "#fff",
+                        fontWeight: 600,
+                        fontSize: "0.875rem",
+                        px: 2.5,
+                        py: 1,
+                        borderRadius: "4px",
+                        "&:hover": { backgroundColor: "#1a6bbf" },
+                      }}
+                    >
+                      <EmailIcon sx={{ fontSize: 16 }} />
+                      Contact Us at {APP_CONFIG.contactEmail}
+                    </Link>
+                  </Box>
+                </Box>
+                </Box>
               )}
             </>
           )}
