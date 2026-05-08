@@ -9,9 +9,15 @@ import {
   Link,
   CircularProgress,
   Button,
+  Paper,
 } from "@mui/material";
 import { ThemeProvider } from "@mui/material/styles";
 import EmailIcon from "@mui/icons-material/Email";
+import ArticleIcon from "@mui/icons-material/Article";
+import BarChartIcon from "@mui/icons-material/BarChart";
+import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
+import FilterAltIcon from "@mui/icons-material/FilterAlt";
+import LockOpenIcon from "@mui/icons-material/LockOpen";
 import Logo from "./components/Logo";
 import UseCaseTable from "./components/UseCaseTable";
 import IndustryDataTable from "./components/IndustryDataTable";
@@ -34,6 +40,13 @@ function App() {
     logPageView();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reset scroll when switching to How to Use tab
+  useEffect(() => {
+    if (activeTab === 2) {
+      document.getElementById("tabpanel-2")?.scrollTo({ top: 0 });
+    }
+  }, [activeTab]);
 
   const {
     useCaseData,
@@ -246,69 +259,136 @@ function App() {
                 <Box
                   id="tabpanel-2"
                   role="tabpanel"
-                  sx={{ flex: 1, overflowY: "auto", px: 2, py: 2 }}
+                  sx={{ flex: 1, overflowY: "auto", px: 3, py: 3 }}
                 >
-                <Box sx={{ maxWidth: 720, mx: "auto" }}>
-                  <Typography variant="h5" sx={{ fontWeight: 700, mb: 2, color: "#1a1a1a" }}>
-                    About the AI Use Case Repository
-                  </Typography>
-                  <Typography variant="body1" sx={{ color: "#444", lineHeight: 1.8, mb: 4 }}>
-                    The <strong>AI Use Case (AIUC) Repository</strong> is an internal library of curated AI-powered
-                    use cases spanning multiple industries and business functions. It helps teams discover,
-                    explore, and evaluate relevant AI opportunities — from implementation plans and expected
-                    outcomes to the datasets, tools, and frameworks involved. Whether you're looking for
-                    inspiration or a concrete starting point, the repository surfaces real-world use cases
-                    with enough detail to accelerate your AI initiatives.
-                  </Typography>
+                  <Box sx={{ maxWidth: 760, mx: "auto" }}>
 
-                  <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5, color: "#1a1a1a" }}>
-                    How to Navigate
-                  </Typography>
-                  <Box component="ul" sx={{ pl: 2.5, mb: 4, color: "#444", lineHeight: 2 }}>
-                    <li>Use the <strong>Case Study</strong> tab to browse AI use cases with full context.</li>
-                    <li>Use the <strong>Industry Data</strong> tab to filter and explore by industry, function, or capability.</li>
-                    <li>Click any row to expand and see detailed information.</li>
-                    <li>Use the column filter icons to narrow down results.</li>
-                    <li>Registered users unlock additional columns and AI-powered semantic search.</li>
-                  </Box>
+                    {/* Intro */}
+                    <Typography variant="h5" sx={{ fontWeight: 700, mb: 1, color: "#1a1a1a" }}>
+                      About the AI Use Case Repository
+                    </Typography>
+                    <Typography variant="body1" sx={{ color: "#555", lineHeight: 1.8, mb: 4 }}>
+                      An internal library of curated AI use cases spanning industries and business
+                      functions — with implementation details, expected outcomes, tools, and frameworks
+                      to help your team discover and act on AI opportunities faster.
+                    </Typography>
 
-                  <Box
-                    sx={{
-                      border: `1.5px solid ${PURE_ORANGE}`,
-                      borderRadius: "8px",
-                      backgroundColor: "#fff8f5",
-                      p: 3,
-                    }}
-                  >
-                    <Typography variant="h6" sx={{ fontWeight: 700, mb: 1, color: "#1a1a1a" }}>
-                      Request Help / Express Interest
+                    {/* Feature cards */}
+                    <Typography variant="h6" sx={{ fontWeight: 700, mb: 2, color: "#1a1a1a" }}>
+                      What's Inside
                     </Typography>
-                    <Typography variant="body2" sx={{ color: "#555", mb: 2, lineHeight: 1.7 }}>
-                      Have a question about a specific use case? Want to explore how AI can help your team?
-                      Reach out — we'd love to help you get started.
+                    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, mb: 4 }}>
+                      <Paper sx={{ p: 2.5, border: "1px solid #e8e8e8", boxShadow: "none" }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                          <ArticleIcon sx={{ color: PURE_ORANGE, fontSize: 22 }} />
+                          <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#1a1a1a" }}>
+                            Case Study
+                          </Typography>
+                        </Box>
+                        <Typography variant="body2" sx={{ color: "#555", lineHeight: 1.7 }}>
+                          Browse detailed AI use cases with full implementation context — outcomes, datasets, tools, and more.
+                        </Typography>
+                      </Paper>
+                      <Paper sx={{ p: 2.5, border: "1px solid #e8e8e8", boxShadow: "none" }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                          <BarChartIcon sx={{ color: PURE_ORANGE, fontSize: 22 }} />
+                          <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#1a1a1a" }}>
+                            Industry Data
+                          </Typography>
+                        </Box>
+                        <Typography variant="body2" sx={{ color: "#555", lineHeight: 1.7 }}>
+                          Filter and explore use cases by industry, business function, or AI capability in a structured view.
+                        </Typography>
+                      </Paper>
+                    </Box>
+
+                    {/* Navigation steps */}
+                    <Typography variant="h6" sx={{ fontWeight: 700, mb: 2, color: "#1a1a1a" }}>
+                      How to Navigate
                     </Typography>
-                    <Link
-                      href={`mailto:${APP_CONFIG.contactEmail}`}
-                      underline="none"
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, mb: 4 }}>
+                      {[
+                        { icon: <ArticleIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <><strong>Case Study</strong> tab — browse AI use cases with full context.</> },
+                        { icon: <BarChartIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <><strong>Industry Data</strong> tab — filter and explore by industry, function, or capability.</> },
+                        { icon: <UnfoldMoreIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Click any row to expand and see detailed information.</> },
+                        { icon: <FilterAltIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Use the column filter icons to narrow down results.</> },
+                        { icon: <LockOpenIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Register to unlock additional columns and AI-powered semantic search.</> },
+                      ].map((step, i) => (
+                        <Box
+                          key={i}
+                          sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 1.5,
+                            backgroundColor: "#f8faff",
+                            borderRadius: "6px",
+                            px: 2,
+                            py: 1.5,
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: 26,
+                              height: 26,
+                              borderRadius: "50%",
+                              backgroundColor: "#e0edfd",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: PURE_ORANGE, lineHeight: 1 }}>
+                              {i + 1}
+                            </Typography>
+                          </Box>
+                          {step.icon}
+                          <Typography variant="body2" sx={{ color: "#444", lineHeight: 1.7 }}>
+                            {step.text}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+
+                    {/* CTA */}
+                    <Box
                       sx={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 0.75,
-                        backgroundColor: PURE_ORANGE,
-                        color: "#fff",
-                        fontWeight: 600,
-                        fontSize: "0.875rem",
-                        px: 2.5,
-                        py: 1,
-                        borderRadius: "4px",
-                        "&:hover": { backgroundColor: "#1a6bbf" },
+                        border: `1.5px solid ${PURE_ORANGE}`,
+                        borderRadius: "8px",
+                        backgroundColor: "#f0f6ff",
+                        p: 3,
                       }}
                     >
-                      <EmailIcon sx={{ fontSize: 16 }} />
-                      Contact Us at {APP_CONFIG.contactEmail}
-                    </Link>
+                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1, color: "#1a1a1a" }}>
+                        Request Help / Express Interest
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: "#555", mb: 2, lineHeight: 1.7 }}>
+                        Have a question about a specific use case? Want to explore how AI can help your team?
+                        Reach out — we'd love to help you get started.
+                      </Typography>
+                      <Link
+                        href={`mailto:${APP_CONFIG.contactEmail}`}
+                        underline="none"
+                        sx={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 0.75,
+                          backgroundColor: PURE_ORANGE,
+                          color: "#fff",
+                          fontWeight: 600,
+                          fontSize: "0.875rem",
+                          px: 2.5,
+                          py: 1,
+                          borderRadius: "4px",
+                          "&:hover": { backgroundColor: "#1a6bbf" },
+                        }}
+                      >
+                        <EmailIcon sx={{ fontSize: 16 }} />
+                        Contact Us at {APP_CONFIG.contactEmail}
+                      </Link>
+                    </Box>
+
                   </Box>
-                </Box>
                 </Box>
               )}
             </>

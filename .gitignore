@@ -35,6 +35,9 @@ Thumbs.db
 *.sw?
 .cursor/
 
+# Playwright MCP artifacts
+.playwright-mcp/
+
 # Misc
 backup_nextjs/
 out/
