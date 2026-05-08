@@ -40,11 +40,13 @@ backup_nextjs/
 out/
 build/
 dist1/
+dist2/
+dist3/
+dist[0-9]*/
 lambda.zip
 
-# Session/context dump files
-2026-*.txt
-2025-*.txt
+# Session/context dump files — any .txt in the repo root
+*.txt
 
 # Local data & eval directories
 data/
