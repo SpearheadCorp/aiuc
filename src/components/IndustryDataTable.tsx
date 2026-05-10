@@ -46,6 +46,9 @@ import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import MailOutlineIcon from "@mui/icons-material/MailOutline";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
+import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
 import type { IndustryData } from "../types";
 import { parseChipItems } from "../utils";
 import ContactDialog from "./ContactDialog";
@@ -498,7 +501,13 @@ export default function IndustryDataTable({
       } as ColumnDef<IndustryRow>] : []),
       {
         id: "contact",
-        header: () => null,
+        header: () => (
+          <Tooltip title="For more information, click here" arrow placement="top">
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", cursor: "default" }}>
+              <InfoOutlinedIcon sx={{ fontSize: 16, color: "#888" }} />
+            </Box>
+          </Tooltip>
+        ),
         cell: ({ row }) => (
           <Tooltip title={APP_CONFIG.emailTooltipText} arrow>
             <IconButton
@@ -524,6 +533,59 @@ export default function IndustryDataTable({
           </Tooltip>
         ),
         size: 100,
+      },
+      {
+        accessorKey: "Id",
+        header: ({ column }) => {
+          const sortDirection = column.getIsSorted();
+          return (
+            <Box
+              onClick={() => column.toggleSorting()}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 0.5,
+                cursor: "pointer",
+                width: "100%",
+                height: "100%",
+                userSelect: "none",
+              }}
+            >
+              <Typography variant="caption" sx={{ fontWeight: 600, fontSize: 11, whiteSpace: "nowrap" }}>
+                Use Case #
+              </Typography>
+              <Box sx={{ display: "flex", flexDirection: "column" }}>
+                {sortDirection === "asc" ? (
+                  <ArrowUpwardIcon sx={{ fontSize: 16, color: PURE_ORANGE }} />
+                ) : sortDirection === "desc" ? (
+                  <ArrowDownwardIcon sx={{ fontSize: 16, color: PURE_ORANGE }} />
+                ) : (
+                  <Box sx={{ width: 16, height: 16 }} />
+                )}
+              </Box>
+            </Box>
+          );
+        },
+        size: 110,
+        enableSorting: true,
+        cell: ({ row, getValue }) => {
+          const isExpanded = expandedRows.has(row.original.Id);
+          return (
+            <Box
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleRowExpansion(row.original.Id);
+              }}
+              sx={{ display: "flex", alignItems: "center", gap: 0.5, width: "100%", cursor: "pointer", py: 1 }}
+            >
+              {getValue() as React.ReactNode}
+              {isExpanded
+                ? <UnfoldLessIcon sx={{ fontSize: 14, color: PURE_ORANGE, flexShrink: 0 }} />
+                : <UnfoldMoreIcon sx={{ fontSize: 14, color: "#aaa", flexShrink: 0 }} />
+              }
+            </Box>
+          );
+        },
       },
       // Define Industry Data Columns
       {
@@ -660,16 +722,34 @@ export default function IndustryDataTable({
         enableSorting: true,
         cell: ({ row, getValue }) => {
           const isExpanded = expandedRows.has(row.original.Id);
+          const raw = (getValue() as string) ?? "";
+          if (isExpanded) {
+            const steps = raw
+              .split(/(?=\d+\.\s)/)
+              .map((s) => s.replace(/^\d+\.\s*/, "").trim())
+              .filter(Boolean);
+            return steps.length > 1 ? (
+              <Box component="ol" sx={{ m: 0, pl: 2.5, py: 1 }}>
+                {steps.map((step, i) => (
+                  <Box component="li" key={i} sx={{ mb: 0.5, fontSize: "0.875rem" }}>
+                    {step}
+                  </Box>
+                ))}
+              </Box>
+            ) : (
+              <Box sx={{ whiteSpace: "normal", py: 1 }}>{raw}</Box>
+            );
+          }
           return (
             <Box
               sx={{
-                whiteSpace: isExpanded ? "normal" : "nowrap",
-                overflow: isExpanded ? "visible" : "hidden",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
                 textOverflow: "ellipsis",
                 py: 1,
               }}
             >
-              {getValue() as React.ReactNode}
+              {raw}
             </Box>
           );
         },
@@ -1517,6 +1597,37 @@ const FilterPopup = ({
         {isMultiselectField && (
           <>
             <Divider sx={{ mb: 1 }} />
+            {filteredUniqueValues.length > 0 && (() => {
+              const allSelected = filteredUniqueValues.every((v) => selectedValues.has(v));
+              const someSelected = !allSelected && filteredUniqueValues.some((v) => selectedValues.has(v));
+              const handleSelectAll = () => {
+                setSelectedValues((prev) => {
+                  const next = new Set(prev);
+                  if (allSelected) {
+                    filteredUniqueValues.forEach((v) => next.delete(v));
+                  } else {
+                    filteredUniqueValues.forEach((v) => next.add(v));
+                  }
+                  return next;
+                });
+              };
+              return (
+                <ListItem disablePadding sx={{ borderBottom: "1px solid #eee", mb: 0.5 }}>
+                  <ListItemButton onClick={handleSelectAll} dense>
+                    <Checkbox
+                      checked={allSelected}
+                      indeterminate={someSelected}
+                      size="small"
+                      sx={{ color: PURE_ORANGE, "&.Mui-checked": { color: PURE_ORANGE }, "&.MuiCheckbox-indeterminate": { color: PURE_ORANGE } }}
+                    />
+                    <ListItemText
+                      primary={allSelected ? "Deselect All" : "Select All"}
+                      primaryTypographyProps={{ fontSize: "0.875rem", fontWeight: 600 }}
+                    />
+                  </ListItemButton>
+                </ListItem>
+              );
+            })()}
             <Box sx={{ maxHeight: 300, overflow: "auto", mb: 2 }}>
               {filteredUniqueValues.length === 0 ? (
                 <Typography variant="body2" sx={{ p: 2, color: "#666" }}>

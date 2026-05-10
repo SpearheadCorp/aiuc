@@ -16,7 +16,7 @@ import EmailIcon from "@mui/icons-material/Email";
 import ArticleIcon from "@mui/icons-material/Article";
 import BarChartIcon from "@mui/icons-material/BarChart";
 import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
-import FilterAltIcon from "@mui/icons-material/FilterAlt";
+import FilterListIcon from "@mui/icons-material/FilterList";
 import LockOpenIcon from "@mui/icons-material/LockOpen";
 import Logo from "./components/Logo";
 import UseCaseTable from "./components/UseCaseTable";
@@ -57,7 +57,7 @@ function App() {
     errorIndustry,
   } = useS3Data();
 
-  const TAB_NAMES = ["Case Study", "Industry Data", "How to Use"];
+  const TAB_NAMES = ["Business Function", "Industry", "How to Use"];
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
     logClick("tab", { tabName: TAB_NAMES[newValue] });
@@ -117,7 +117,7 @@ function App() {
                 component="h1"
                 sx={{ color: "#1a1a1a", fontWeight: 700, fontSize: "1.6rem", letterSpacing: "-0.01em" }}
               >
-                AI Use Case Repository
+                AI Use Case Library
               </Typography>
             </Box>
 
@@ -202,8 +202,8 @@ function App() {
               }
             }}
           >
-            <Tab label="Case Study" id="tab-0" aria-controls="tabpanel-0" />
-            <Tab label="Industry Data" id="tab-1" aria-controls="tabpanel-1" />
+            <Tab label="Business Function" id="tab-0" aria-controls="tabpanel-0" />
+            <Tab label="Industry" id="tab-1" aria-controls="tabpanel-1" />
             <Tab label="How to Use" id="tab-2" aria-controls="tabpanel-2" />
           </Tabs>
         </Box>
@@ -265,7 +265,7 @@ function App() {
 
                     {/* Intro */}
                     <Typography variant="h5" sx={{ fontWeight: 700, mb: 1, color: "#1a1a1a" }}>
-                      About the AI Use Case Repository
+                      About the AI Use Case Library
                     </Typography>
                     <Typography variant="body1" sx={{ color: "#555", lineHeight: 1.8, mb: 4 }}>
                       An internal library of curated AI use cases spanning industries and business
@@ -282,7 +282,7 @@ function App() {
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
                           <ArticleIcon sx={{ color: PURE_ORANGE, fontSize: 22 }} />
                           <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#1a1a1a" }}>
-                            Case Study
+                            Business Functions
                           </Typography>
                         </Box>
                         <Typography variant="body2" sx={{ color: "#555", lineHeight: 1.7 }}>
@@ -293,7 +293,7 @@ function App() {
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
                           <BarChartIcon sx={{ color: PURE_ORANGE, fontSize: 22 }} />
                           <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#1a1a1a" }}>
-                            Industry Data
+                            Industry
                           </Typography>
                         </Box>
                         <Typography variant="body2" sx={{ color: "#555", lineHeight: 1.7 }}>
@@ -308,10 +308,10 @@ function App() {
                     </Typography>
                     <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, mb: 4 }}>
                       {[
-                        { icon: <ArticleIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <><strong>Case Study</strong> tab — browse AI use cases with full context.</> },
-                        { icon: <BarChartIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <><strong>Industry Data</strong> tab — filter and explore by industry, function, or capability.</> },
+                        { icon: <ArticleIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <><strong>Business Functions</strong> tab — browse AI use cases with full context.</> },
+                        { icon: <BarChartIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <><strong>Industry</strong> tab — filter and explore by industry, function, or capability.</> },
                         { icon: <UnfoldMoreIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Click any row to expand and see detailed information.</> },
-                        { icon: <FilterAltIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Use the column filter icons to narrow down results.</> },
+                        { icon: <FilterListIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Use the column filter icons to narrow down results.</> },
                         { icon: <LockOpenIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Register to unlock additional columns and AI-powered semantic search.</> },
                       ].map((step, i) => (
                         <Box
