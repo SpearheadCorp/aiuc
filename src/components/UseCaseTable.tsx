@@ -1314,6 +1314,7 @@ export default function UseCaseTable({
                     key={row.id}
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
+                    onClick={() => toggleRowExpansion(row.original.id)}
                     sx={{
                       display: "grid",
                       gridTemplateColumns: columns.map((col) => `${col.size || 150}px`).join(" "),
@@ -1325,6 +1326,7 @@ export default function UseCaseTable({
                       backgroundColor: "#ffffff",
                       borderBottom: "1px solid #e0e0e0",
                       transition: "background-color 0.2s ease",
+                      cursor: "pointer",
                       "&:hover": {
                         backgroundColor: "#fafafa",
                       },
