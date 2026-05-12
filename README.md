@@ -1,8 +1,8 @@
-# AI Use Case Repository (AIUC)
+# AI Use Case Library (AIUC)
 
-A React + TypeScript SPA backed by a single AWS Lambda function that lets authenticated employees browse, filter, and semantically search an internal library of AI use cases. Users type a natural-language sentence or paragraph; the system embeds the query with OpenAI, runs cosine-similarity search against pre-computed use-case vectors, and returns the most relevant results along with a concise "Why Matched" explanation for each one.
+A React + TypeScript single-page application backed by a single AWS Lambda function that lets authenticated employees browse, filter, and semantically search an internal library of AI use cases. Users type a natural-language sentence or paragraph; the system embeds the query with OpenAI, runs a **hybrid search** (vector cosine similarity + keyword matching via Reciprocal Rank Fusion) against pre-computed use-case vectors, and returns the most relevant results ranked by combined semantic and keyword relevance.
 
-Deployed at: **Everpure (PureStorage)** — authentication via Okta, AI via OpenAI, infra on AWS (Lambda + S3).
+Deployed at: **Everpure (PureStorage)** — authentication via Okta, AI via OpenAI, infrastructure on AWS (Lambda + S3).
 
 ---
 
@@ -14,27 +14,31 @@ Deployed at: **Everpure (PureStorage)** — authentication via Okta, AI via Open
 4. [Getting Started — Local Development](#getting-started--local-development)
 5. [Architecture](#architecture)
 6. [OpenAI Embedding Pipeline](#openai-embedding-pipeline)
-7. [Environment Variables Reference](#environment-variables-reference)
-8. [Available Scripts](#available-scripts)
-9. [Deployment](#deployment)
-   - [Step 1 — Generate & Upload Embeddings](#step-1--generate--upload-embeddings)
-   - [Step 2 — Build & Upload Frontend](#step-2--build--upload-frontend)
-   - [Step 3 — Package & Deploy Lambda](#step-3--package--deploy-lambda)
-   - [Step 4 — AWS Secrets Manager](#step-4--aws-secrets-manager)
-   - [Step 5 — Lambda Environment Variables](#step-5--lambda-environment-variables)
-   - [CI/CD via GitHub Actions](#cicd-via-github-actions)
-10. [AI Search Feature Flag](#ai-search-feature-flag)
-11. [Rate Limiting](#rate-limiting)
-12. [Troubleshooting](#troubleshooting)
+7. [Hybrid Search — How It Works](#hybrid-search--how-it-works)
+8. [Environment Variables Reference](#environment-variables-reference)
+9. [Available Scripts](#available-scripts)
+10. [Deployment](#deployment)
+    - [Step 1 — Generate & Upload Embeddings](#step-1--generate--upload-embeddings)
+    - [Step 2 — Build & Upload Frontend](#step-2--build--upload-frontend)
+    - [Step 3 — Package & Deploy Lambda](#step-3--package--deploy-lambda)
+    - [Step 4 — AWS Secrets Manager](#step-4--aws-secrets-manager)
+    - [Step 5 — Lambda Environment Variables](#step-5--lambda-environment-variables)
+    - [CI/CD via GitHub Actions](#cicd-via-github-actions)
+11. [AI Search Feature Flag](#ai-search-feature-flag)
+12. [Rate Limiting](#rate-limiting)
+13. [Security Notes](#security-notes)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Key Features
 
-- **Semantic AI Search** — type a sentence or full paragraph; the system finds the most relevant use cases by meaning, not just keywords.
-- **"Why Matched" column** — each result includes a 1–2 sentence AI-generated explanation of why it matched the query.
-- **Two datasets** — "Case Study" (PureStorage-specific use cases) and "Industry Data" (cross-industry use cases), each with independent AI search.
-- **AI toggle flag** — `ENABLE_AI_SEARCH=false` falls back to keyword search with no UI change, useful for cost control or if the OpenAI key is unavailable.
+- **Hybrid AI Search** — type a sentence or full paragraph; the system finds the most relevant use cases by combining semantic (vector) similarity and keyword matching so both intent-based and exact-term queries work accurately.
+- **Two datasets** — **Business Function** tab (PureStorage-specific use cases) and **Industry** tab (cross-industry use cases), each with independent AI search and column filtering.
+- **Expand/collapse rows** — click anywhere on a row to expand it and see full details; implementation plans render as numbered lists.
+- **Select All / Deselect All in filters** — filter popups in both tabs support one-click select all or deselect all with indeterminate state.
+- **How to Use tab** — built-in onboarding guide with feature overview, navigation tips, and a contact CTA.
+- **AI toggle flag** — `ENABLE_AI_SEARCH=false` falls back to improved keyword search with no UI change, useful for cost control or if the OpenAI key is unavailable.
 - **Okta PKCE authentication** — all data endpoints require a valid Okta JWT; the Okta config is fetched dynamically at runtime, not baked into the build.
 - **Virtualized tables** — TanStack React Table + React Virtual handle large datasets smoothly without pagination.
 - **Per-user rate limiting** — sliding-window limit on `/api/search*` protects OpenAI costs.
@@ -54,8 +58,9 @@ Deployed at: **Everpure (PureStorage)** — authentication via Okta, AI via Open
 | **Static hosting** | AWS S3 (Lambda serves `dist/` from S3) |
 | **JWT verification** | `jose` (JWKS, RS256) |
 | **AI Embeddings** | OpenAI `text-embedding-3-small` (1536 dimensions) |
-| **AI Explanations** | OpenAI `gpt-4o-mini` |
 | **Vector search** | Pure-JS cosine similarity (FlatIP index, in-memory) |
+| **Keyword search** | Term-frequency with stop-word filtering and phrase-match bonus |
+| **Hybrid ranking** | Reciprocal Rank Fusion (RRF) merging vector + keyword results |
 | **Secrets** | AWS Secrets Manager |
 | **CI/CD** | GitHub Actions (`.github/workflows/deploy.yml`) |
 
@@ -101,7 +106,7 @@ cp .env.example .env.local
 Open `.env.local` and fill in:
 
 ```env
-# Okta — get these from your Okta admin or AWS Secrets Manager
+# Okta — get these from your Okta admin or the deployed /api/okta-config response
 VITE_OKTA_ISSUER=https://YOUR_OKTA_DOMAIN.okta.com/oauth2/default
 VITE_OKTA_CLIENT_ID=0oaXXXXXXXXXXXXXXXXX
 
@@ -159,6 +164,20 @@ Open [http://localhost:5173](http://localhost:5173). You will be redirected to O
 
 > The Vite server proxies all `/api/*` requests to `localhost:3001`, so you get the same API behaviour as production without deploying anything.
 
+### 6. Okta redirect URI setup
+
+The first time you run locally, you may see an Okta error: `The 'redirect_uri' parameter must be a Login redirect URI`. Fix this by going to your Okta Admin → your app → **General** tab → **Login redirect URIs** and adding:
+
+```
+http://localhost:5173/callback
+```
+
+For production, also add:
+```
+https://your-production-domain.com/callback
+https://your-production-domain.com/app/aiuc/callback
+```
+
 ---
 
 ## Architecture
@@ -173,14 +192,14 @@ aiuc/
 │   ├── types.ts                  # TypeScript interfaces (UseCaseData, IndustryData)
 │   ├── theme.ts                  # MUI theme + brand colours
 │   ├── components/
-│   │   ├── UseCaseTable.tsx      # Case Study tab — table + AI search bar
-│   │   ├── IndustryDataTable.tsx # Industry Data tab — table + AI search bar
+│   │   ├── UseCaseTable.tsx      # Business Function tab — table + AI search bar
+│   │   ├── IndustryDataTable.tsx # Industry tab — table + AI search bar
 │   │   ├── ContactDialog.tsx     # "Request Info" modal (opens Gmail compose)
 │   │   └── Logo.tsx              # Accessible logo with fallback text
 │   ├── hooks/
 │   │   ├── useS3Data.ts          # Fetches both datasets on mount (JWT-authenticated)
-│   │   ├── useAISearch.ts        # POST /api/search — use case semantic search
-│   │   ├── useIndustrySearch.ts  # POST /api/search/industry — industry semantic search
+│   │   ├── useAISearch.ts        # POST /api/search — use case hybrid search
+│   │   ├── useIndustrySearch.ts  # POST /api/search/industry — industry hybrid search
 │   │   └── useOktaUser.ts        # Extracts user name + email from Okta auth state
 │   └── config/
 │       └── okta.ts               # Fetches /api/okta-config then builds OktaAuth instance
@@ -189,8 +208,7 @@ aiuc/
 │   ├── index.mjs                 # Main handler — routes all requests
 │   ├── core/                     # Shared module (Everpure + Spearhead both import this)
 │   │   ├── embeddings.mjs        # OpenAI text-embedding-3-small wrapper
-│   │   ├── why_matched.mjs       # OpenAI gpt-4o-mini "Why Matched" generation
-│   │   ├── search.mjs            # FlatIP index, vector search, keyword fallback
+│   │   ├── search.mjs            # FlatIP index, hybrid search (RRF), keyword search
 │   │   ├── api_handlers.mjs      # Route logic for /api/search and /api/search/industry
 │   │   └── ai_toggle.mjs         # ENABLE_AI_SEARCH feature flag
 │   ├── local-server.mjs          # Dev server that mirrors Lambda (reads local files)
@@ -219,8 +237,8 @@ aiuc/
 | `GET` | `/api/okta-config` | None | Returns Okta issuer + clientId from Secrets Manager |
 | `GET` | `/api/data/use-cases` | JWT | Reads `use_cases.json` from S3 |
 | `GET` | `/api/data/industry` | JWT | Reads `industry_use_cases.json` from S3 |
-| `POST` | `/api/search` | JWT + rate limit | Semantic search over use cases |
-| `POST` | `/api/search/industry` | JWT + rate limit | Semantic search over industry use cases |
+| `POST` | `/api/search` | JWT + rate limit | Hybrid search over use cases |
+| `POST` | `/api/search/industry` | JWT + rate limit | Hybrid search over industry use cases |
 | `GET` | `/*` | None | Serves `dist/index.html` or static assets from S3 |
 
 ### Request flow
@@ -243,9 +261,9 @@ Browser
       { "query": "automate invoice processing" } └─ Fetches OpenAI key from Secrets Manager
                                                  └─ Embeds query via OpenAI (1536-dim)
                                                  └─ Loads pure_use_cases_embeddings.json from S3
-                                                 └─ Cosine similarity search (FlatIP index)
-                                                 └─ Generates "Why Matched" via gpt-4o-mini
-                                                 └─ Returns top-K results + explanations
+                                                 └─ Runs vector search (top 4×K candidates)
+                                                 └─ Runs keyword search (stop-word filtered, phrase bonus)
+                                                 └─ Merges both via RRF → returns top-K results
 ```
 
 ### Authentication flow
@@ -259,11 +277,11 @@ Browser
 
 ### Shared core module
 
-`lambda/core/` is the single source of truth for all RAG logic. Both the Everpure Lambda and the Spearhead Lambda import from `core/` — never duplicating the embedding, search, or explanation code. Only deployment-specific things differ: auth provider, branding, S3 bucket, and embedding file names.
+`lambda/core/` is the single source of truth for all search logic. Both the Everpure Lambda and the Spearhead Lambda import from `core/` — never duplicating the embedding, search, or ranking code. Only deployment-specific things differ: auth provider, branding, S3 bucket, and embedding file names.
 
 ```
 lambda/index.mjs (Everpure)    ──┐
-                                  ├──► lambda/core/ (shared RAG + search logic)
+                                  ├──► lambda/core/ (shared search + embedding logic)
 spearhead/index.mjs (Spearhead) ──┘
 ```
 
@@ -275,7 +293,7 @@ spearhead/index.mjs (Spearhead) ──┘
 
 Standard keyword search matches exact words. If a user types *"reduce manual effort in accounts payable"*, keyword search won't find a use case titled *"Invoice Automation"* unless the same words appear. Semantic/vector search fixes this by converting both the query and every use case into a high-dimensional numeric vector (an "embedding") where **meaning determines proximity**, not exact words.
 
-We use **OpenAI `text-embedding-3-small`** — a 1536-dimension model. Each use case record is converted into a 1536-number vector and stored in a JSON file on S3. At search time, the user's query is embedded on the fly, then compared against all stored vectors using cosine similarity. The closest matches are returned.
+We use **OpenAI `text-embedding-3-small`** — a 1536-dimension model. Each use case record is converted into a 1536-number vector and stored in a JSON file on S3. At search time, the user's query is embedded on the fly, then compared against all stored vectors using cosine similarity.
 
 ### Why we pre-compute embeddings offline
 
@@ -297,25 +315,6 @@ Both the Everpure (PureStorage) and Spearhead deployments may share the same S3 
 ### Why OpenAI instead of Bedrock for Everpure
 
 Everpure's infosec team has not officially approved AWS Bedrock. OpenAI APIs are approved and the key is stored securely in AWS Secrets Manager under `EVERPURE_OPENAI_API_KEY`. Spearhead continues to use Bedrock since it is already approved for that deployment.
-
-### How "Why Matched" works
-
-After the vector search returns the top-K results, the Lambda makes **a single `gpt-4o-mini` call** with all results in one prompt. It asks the model to write 1–2 sentences for each result explaining specifically why it matches the query. The response is parsed as a JSON array and attached to each result before returning to the frontend.
-
-```
-Query: "automate invoice processing"
-           │
-           ├─ OpenAI embedding → [0.021, -0.041, ...] (1536 dims)
-           │
-           ├─ Cosine similarity vs all pre-computed use-case vectors
-           │
-           ├─ Top 10 results selected
-           │
-           └─ Single gpt-4o-mini call:
-                "For each of the following 10 use cases, write 1-2 sentences
-                 explaining why it matches the query..."
-                  └─ Returns JSON array of 10 explanations
-```
 
 ### Step-by-step: generating embedding files locally
 
@@ -377,6 +376,36 @@ npm run embeddings:industry
 
 ---
 
+## Hybrid Search — How It Works
+
+The search system combines two complementary methods so it handles both **intent-based** queries ("find ways to reduce operational costs") and **exact-term** queries ("Targeted campaign as expected outcome") accurately.
+
+### The three improvements in keyword search
+
+Before hybrid fusion, the keyword search itself was upgraded:
+
+1. **Stop word filtering** — generic words like "filter", "all", "use", "cases", "with", "as" are stripped from scoring. Only meaningful domain words count.
+2. **Term-frequency counting** — instead of binary (found/not found), the score counts how many times each term appears. Records that prominently feature a term rank higher.
+3. **Phrase-match bonus** — if consecutive meaningful terms appear as an exact phrase (e.g., "targeted campaign"), the record gets a significant score boost (`searchTerms.length × 3`), pulling exact phrase matches to the top.
+
+### Reciprocal Rank Fusion (RRF)
+
+After running both vector search and keyword search independently (each returning 4× the final result count as candidates), RRF merges them:
+
+```
+combined_score = 1 / (60 + rank_vector) + 1 / (60 + rank_keyword)
+```
+
+Every candidate from either list gets a score based on its rank in each list. Candidates appearing near the top of both lists win; candidates absent from one list get a default penalty rank. The top-K by combined score are returned.
+
+**Result:** semantic queries surface conceptually related use cases via the vector component; exact keyword queries surface precise matches via the phrase-bonus keyword component — both work well simultaneously without any configuration.
+
+### Single Bedrock/OpenAI call per search
+
+Each search query makes exactly **one** OpenAI API call (to generate the query embedding). The keyword search and RRF fusion are pure in-memory JavaScript — no additional API calls, no latency, no cost.
+
+---
+
 ## Environment Variables Reference
 
 ### `.env.local` — local development only (never commit)
@@ -417,6 +446,8 @@ The secret named by `AIUC_SECRET_NAME` must contain:
 ```
 
 The Lambda reads both keys from one secret on cold start and caches them in memory for the lifetime of the container.
+
+> **Why Secrets Manager instead of Lambda env vars?** Lambda env vars are visible in plain text to anyone with `lambda:GetFunctionConfiguration` IAM permission. Secrets Manager encrypts values at rest with KMS, provides fine-grained IAM access control, and enables key rotation without redeployment.
 
 ---
 
@@ -518,6 +549,15 @@ aws lambda update-function-code \
 
 Expected zip size: **~4 MB** (jose + openai packages, core/ modules, handler).
 
+> **When do you need to deploy the Lambda vs just the frontend?**
+>
+> | Change | Lambda zip needed? | Frontend build + S3 sync needed? |
+> |---|---|---|
+> | UI changes (React components, styles) | No | Yes |
+> | Backend logic (search, auth, handlers) | Yes | No |
+> | Both (data shape change, new field) | Yes | Yes |
+> | Embeddings data changed | No (just upload new `.json` to S3) | No |
+
 ### Step 4 — AWS Secrets Manager
 
 The Lambda reads both the Okta client ID and the OpenAI API key from a **single** Secrets Manager secret, so you only need to manage one secret entry.
@@ -547,8 +587,6 @@ The Lambda reads both the Okta client ID and the OpenAI API key from a **single*
   "Resource": "arn:aws:secretsmanager:us-east-2:YOUR_ACCOUNT_ID:secret:aiuc/everpure-*"
 }
 ```
-
-> **Why Secrets Manager instead of Lambda env vars?** Lambda env vars are visible in plain text to anyone with `lambda:GetFunctionConfiguration` IAM permission. Secrets Manager encrypts values at rest with KMS, provides fine-grained IAM access control, and enables key rotation without redeployment.
 
 ### Step 5 — Lambda Environment Variables
 
@@ -595,12 +633,12 @@ The `ENABLE_AI_SEARCH` Lambda environment variable controls whether semantic sea
 
 | Value | Behaviour |
 |---|---|
-| `true` (default) | Vector embedding search + "Why Matched" explanations via OpenAI |
-| `false` | Keyword term-frequency search only, no OpenAI calls, no cost |
+| `true` (default) | Hybrid search: OpenAI query embedding → vector search + keyword search → RRF ranking |
+| `false` | Improved keyword-only search (stop-word filtered, phrase-match bonus) — no OpenAI calls, no cost |
 
 When set to `false`:
 - No OpenAI API calls are made — zero cost.
-- The UI search bar still works — results are returned by keyword matching across all text fields.
+- The UI search bar still works — results are returned by keyword matching with stop-word filtering and phrase bonuses across all text fields.
 - No code changes or redeployment needed — just update the env var and the Lambda picks it up on the next cold start.
 
 This flag is useful for:
@@ -622,6 +660,32 @@ The `/api/search` and `/api/search/industry` endpoints enforce a per-user slidin
 - Tune via Lambda env vars: `SEARCH_RATE_LIMIT_MAX` and `SEARCH_RATE_LIMIT_WINDOW_MS`.
 
 > **Note:** The rate limit store is in-memory per Lambda container. If AWS scales to multiple concurrent containers, each has its own store. For a hard global cap, set **Lambda reserved concurrency** in the AWS console — this limits the total number of parallel Lambda executions.
+
+---
+
+## Security Notes
+
+### Query privacy
+
+User search queries are **never logged in plain text** to CloudWatch. The Lambda logs a SHA-256 hash of the query (first 8 hex chars) plus the query length — enough for debugging query volume patterns without exposing the content:
+
+```
+[Search] mode=hybrid results=10 qhash=a3f8c12e qlen=42
+```
+
+### API key storage
+
+The OpenAI API key is stored in AWS Secrets Manager, not in Lambda environment variables. Lambda env vars are visible in plain text to anyone with `lambda:GetFunctionConfiguration` IAM access. Secrets Manager encrypts at rest with KMS and supports key rotation without redeployment.
+
+### JWT verification
+
+Every protected API call verifies the Okta JWT signature using the Okta JWKS endpoint (RS256). Tokens are verified on every request — there is no session storage on the Lambda side.
+
+### Input validation
+
+- Query length is hard-capped at 1000 characters in `api_handlers.mjs`.
+- Result limit is clamped to 1–15 regardless of what the client sends.
+- S3 path traversal is blocked in the static file handler (`.` and `..` segments are rejected with HTTP 400).
 
 ---
 
@@ -681,9 +745,15 @@ The `/api/okta-config` call failed.
 
 ---
 
+### Okta error: "redirect_uri must be a Login redirect URI"
+
+Go to Okta Admin → your OIDC app → **General** tab → **Login redirect URIs** and add the URI the app is using (usually `http://localhost:5173/callback` for local dev, or your production `/callback` path). See [Step 6 in Getting Started](#6-okta-redirect-uri-setup).
+
+---
+
 ### Lambda zip is too large (> 50 MB)
 
-Run the cleanup script before zipping:
+Run the cleanup commands before zipping:
 ```bash
 cd lambda
 npm install --omit=dev
@@ -709,6 +779,17 @@ The local dev server (`local-server.mjs`) does **not** enforce rate limits — t
 
 ---
 
+### Search results seem stale after changing source data
+
+If you edited `use_cases.json` or `industry_use_cases.json`:
+1. Re-run `npm run embeddings` and/or `npm run embeddings:industry` to regenerate embedding vectors.
+2. Upload the new embedding files to S3.
+3. Force a Lambda cold start (redeploy or wait for container recycle).
+
+If you only changed the data JSON (not the embeddings), results from `/api/data/use-cases` will be fresh immediately after uploading to S3 — but AI search will still use the old embeddings until they're regenerated.
+
+---
+
 ### Okta token expired mid-session
 
-The `useOktaAuth` hook handles token refresh automatically via Okta's silent renew mechanism. If you see 401 errors, try signing out and back in via the Okta redirect.
+The `useOktaAuth` hook handles token refresh automatically via Okta's silent renew mechanism. If you see persistent 401 errors, try signing out and back in via the Okta redirect.

@@ -9,9 +9,9 @@
  * deployment can point at its own bucket and embeddings files.
  */
 
+import { createHash } from "crypto";
 import { getEmbedding } from "./embeddings.mjs";
-import { loadSearchIndex, runVectorSearch, runKeywordSearch, USE_CASE_FIELDS, INDUSTRY_FIELDS } from "./search.mjs";
-import { generateExplanations, FALLBACK_WHY } from "./why_matched.mjs";
+import { loadSearchIndex, runHybridSearch, runKeywordSearch, USE_CASE_FIELDS, INDUSTRY_FIELDS } from "./search.mjs";
 import { ENABLE_AI_SEARCH } from "./ai_toggle.mjs";
 
 /**
@@ -24,7 +24,7 @@ import { ENABLE_AI_SEARCH } from "./ai_toggle.mjs";
  * @param {string}   opts.bucket               - S3 bucket containing the embeddings file
  * @param {string}   opts.embeddingsKey        - S3 key for use-case embeddings JSON
  * @param {import("openai").OpenAI} opts.openaiClient
- * @returns {Promise<{ results: Array<{ useCase: object, score: number, whyMatched: string }> }>}
+ * @returns {Promise<{ results: Array<{ useCase: object, score: number }> }>}
  */
 export async function handleUseCaseSearch({ query, limit, s3Client, bucket, embeddingsKey, openaiClient }) {
     const queryText = query.trim().slice(0, 1000);
@@ -38,8 +38,8 @@ export async function handleUseCaseSearch({ query, limit, s3Client, bucket, embe
     if (ENABLE_AI_SEARCH) {
         try {
             const queryVec = await getEmbedding(queryText, openaiClient);
-            results = runVectorSearch(index, meta, queryVec, safeLimit);
-            searchMode = "vector";
+            results = runHybridSearch(index, meta, queryVec, queryText, USE_CASE_FIELDS, safeLimit);
+            searchMode = "hybrid";
         } catch (err) {
             console.warn(`[Search] embedding failed → keyword fallback: ${err.message}`);
             results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit);
@@ -50,20 +50,12 @@ export async function handleUseCaseSearch({ query, limit, s3Client, bucket, embe
         searchMode = "keyword";
     }
 
-    const useCases = results.map(r => r.data);
-    const explanations = await generateExplanations(
-        queryText,
-        useCases,
-        uc => `"${uc.ai_use_case || ""}" — ${uc.business_function || ""} / ${uc.business_capability || ""}: ${uc.action_implementation || ""}`,
-        openaiClient
-    );
-
-    console.log(`[Search] mode=${searchMode} results=${results.length} query="${queryText.slice(0, 60)}"`);
+    const qHash = createHash("sha256").update(queryText).digest("hex").slice(0, 8);
+    console.log(`[Search] mode=${searchMode} results=${results.length} qhash=${qHash} qlen=${queryText.length}`);
     return {
-        results: results.map((r, i) => ({
+        results: results.map(r => ({
             useCase: r.data,
             score: r.score,
-            whyMatched: explanations[i] || FALLBACK_WHY,
         })),
     };
 }
@@ -78,7 +70,7 @@ export async function handleUseCaseSearch({ query, limit, s3Client, bucket, embe
  * @param {string}   opts.bucket                  - S3 bucket containing the embeddings file
  * @param {string}   opts.industryEmbeddingsKey   - S3 key for industry embeddings JSON
  * @param {import("openai").OpenAI} opts.openaiClient
- * @returns {Promise<{ results: Array<{ item: object, score: number, whyMatched: string }> }>}
+ * @returns {Promise<{ results: Array<{ item: object, score: number }> }>}
  */
 export async function handleIndustrySearch({ query, limit, s3Client, bucket, industryEmbeddingsKey, openaiClient }) {
     const queryText = query.trim().slice(0, 1000);
@@ -92,8 +84,8 @@ export async function handleIndustrySearch({ query, limit, s3Client, bucket, ind
     if (ENABLE_AI_SEARCH) {
         try {
             const queryVec = await getEmbedding(queryText, openaiClient);
-            results = runVectorSearch(index, meta, queryVec, safeLimit);
-            searchMode = "vector";
+            results = runHybridSearch(index, meta, queryVec, queryText, INDUSTRY_FIELDS, safeLimit);
+            searchMode = "hybrid";
         } catch (err) {
             console.warn(`[IndustrySearch] embedding failed → keyword fallback: ${err.message}`);
             results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit);
@@ -104,20 +96,12 @@ export async function handleIndustrySearch({ query, limit, s3Client, bucket, ind
         searchMode = "keyword";
     }
 
-    const items = results.map(r => r.data);
-    const explanations = await generateExplanations(
-        queryText,
-        items,
-        item => `"${item.ai_use_case || ""}" — ${item.industry || ""} / ${item.business_function || ""}: ${item.description || ""}`,
-        openaiClient
-    );
-
-    console.log(`[IndustrySearch] mode=${searchMode} results=${results.length} query="${queryText.slice(0, 60)}"`);
+    const qHash = createHash("sha256").update(queryText).digest("hex").slice(0, 8);
+    console.log(`[IndustrySearch] mode=${searchMode} results=${results.length} qhash=${qHash} qlen=${queryText.length}`);
     return {
-        results: results.map((r, i) => ({
+        results: results.map(r => ({
             item: r.data,
             score: r.score,
-            whyMatched: explanations[i] || FALLBACK_WHY,
         })),
     };
 }

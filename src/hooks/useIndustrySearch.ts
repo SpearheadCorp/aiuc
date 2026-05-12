@@ -5,7 +5,6 @@ import type { IndustryData } from "../types";
 export interface IndustrySearchResult {
   item: IndustryData;
   score: number;
-  whyMatched: string;
 }
 
 export function useIndustrySearch() {
@@ -38,7 +37,7 @@ export function useIndustrySearch() {
         throw new Error(errData.error || `Search failed (${response.status})`);
       }
       const data = await response.json();
-      type RawResult = { item: Record<string, string>; score: number; whyMatched: string };
+      type RawResult = { item: Record<string, string>; score: number };
       const mapped: IndustrySearchResult[] = (data.results || []).map((r: RawResult) => ({
         item: {
           Id: r.item.id,
@@ -58,7 +57,6 @@ export function useIndustrySearch() {
           "Industry References": r.item.industry_references,
         } as IndustryData,
         score: r.score,
-        whyMatched: r.whyMatched,
       }));
       setResults(mapped);
     } catch (err) {

@@ -5,7 +5,6 @@ import type { UseCaseData } from "../types";
 export interface AISearchResult {
   useCase: UseCaseData;
   score: number;
-  whyMatched: string;
 }
 
 export function useAISearch() {
@@ -39,7 +38,7 @@ export function useAISearch() {
       }
       const data = await response.json();
       // Map snake_case keys from the API to the PascalCase UseCaseData interface
-      type RawResult = { useCase: Record<string, string>; score: number; whyMatched: string };
+      type RawResult = { useCase: Record<string, string>; score: number };
       const mapped: AISearchResult[] = (data.results || []).map((r: RawResult) => ({
         useCase: {
           id: Number(r.useCase.capability),
@@ -56,7 +55,6 @@ export function useAISearch() {
           "Expected Outcomes and Results": r.useCase.expected_outcomes_and_results,
         } as UseCaseData,
         score: r.score,
-        whyMatched: r.whyMatched,
       }));
       setResults(mapped);
     } catch (err) {
