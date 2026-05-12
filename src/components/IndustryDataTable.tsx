@@ -48,6 +48,8 @@ import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
+import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
 import type { IndustryData } from "../types";
 import { parseChipItems } from "../utils";
 import { openGmailCompose } from "./ContactDialog";
@@ -92,10 +94,6 @@ export default function IndustryDataTable({
   const [aiQuery, setAiQuery] = useState("");
   const { search: doAISearch, results: aiResults, loading: aiLoading, error: aiError, clearResults: clearAIResults } = useIndustrySearch();
   const aiMode = aiResults.length > 0 || aiLoading;
-  const aiResultsMap = useMemo(
-    () => new Map(aiResults.map(r => [r.item.Id, r.whyMatched])),
-    [aiResults]
-  );
 
   const handleAISearchToggle = (enabled: boolean) => {
     setAiEnabled(enabled);
@@ -407,7 +405,13 @@ export default function IndustryDataTable({
     () => [
       {
         id: "contact",
-        header: () => null,
+        header: () => (
+          <Tooltip title="For more information, click here" arrow>
+            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.8rem", cursor: "default" }}>
+              Info
+            </Typography>
+          </Tooltip>
+        ),
         cell: ({ row }) => (
           <Tooltip title={emailTooltipText} arrow>
             <IconButton
@@ -434,37 +438,32 @@ export default function IndustryDataTable({
         ),
         size: 60,
       },
-      // "Why Matched" column — only visible in AI search mode
-      ...(aiMode ? [{
-        id: "whyMatched",
+      {
+        id: "rowNumber",
+        accessorKey: "Id",
         header: () => (
-          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-            <AutoAwesomeIcon sx={{ fontSize: 14, color: PURE_ORANGE }} />
-            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.8rem" }}>
-              Why Matched
-            </Typography>
-          </Box>
+          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>
+            Use Case #
+          </Typography>
         ),
-        size: 200,
+        size: 90,
         enableSorting: false,
         cell: ({ row }) => {
-          const explanation = aiResultsMap.get(row.original.Id);
-          return explanation ? (
-            <Typography
-              variant="body2"
-              sx={{
-                fontSize: "0.72rem",
-                color: "#555",
-                fontStyle: "italic",
-                lineHeight: 1.4,
-                py: 0.25,
-              }}
+          const rowId = row.original.Id;
+          const isExpanded = expandedRows.has(rowId);
+          return (
+            <Box
+              sx={{ width: "100%", cursor: "pointer", py: 1, display: "flex", alignItems: "center", gap: 0.5 }}
             >
-              {explanation}
-            </Typography>
-          ) : null;
+              {row.original.Id}
+              {isExpanded
+                ? <UnfoldLessIcon sx={{ fontSize: 14, color: "#666" }} />
+                : <UnfoldMoreIcon sx={{ fontSize: 14, color: "#666" }} />
+              }
+            </Box>
+          );
         },
-      } as ColumnDef<IndustryData>] : []),
+      },
       // Define Industry Data Columns
       {
         accessorKey: "Industry",
@@ -472,16 +471,9 @@ export default function IndustryDataTable({
         meta: { headerName: "Industry" },
         size: 170,
         enableSorting: true,
-        cell: ({ row, getValue }) => {
-          const rowId = row.original.Id;
+        cell: ({ getValue }) => {
           return (
-            <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
-              sx={{ width: "100%", cursor: "pointer", py: 1 }}
-            >
+            <Box sx={{ width: "100%", cursor: "pointer", py: 1 }}>
               {getValue() as React.ReactNode}
             </Box>
           );
@@ -498,10 +490,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 width: "100%",
                 cursor: "pointer",
@@ -527,10 +516,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 width: "100%",
                 cursor: "pointer",
@@ -556,10 +542,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 width: "100%",
                 cursor: "pointer",
@@ -585,10 +568,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 width: "100%",
                 cursor: "pointer",
@@ -614,10 +594,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 whiteSpace: isExpanded ? "normal" : "nowrap",
                 overflow: isExpanded ? "visible" : "hidden",
@@ -640,12 +617,28 @@ export default function IndustryDataTable({
         cell: ({ row, getValue }) => {
           const rowId = row.original.Id;
           const isExpanded = expandedRows.has(rowId);
+          const rawValue = getValue() as string;
+          if (isExpanded && rawValue) {
+            const steps = rawValue
+              .split(/(?=\d+\.\s)/)
+              .map((s) => s.replace(/^\d+\.\s*/, "").trim())
+              .filter((s) => s.length > 0);
+            if (steps.length > 1) {
+              return (
+                <Box sx={{ py: 1 }}>
+                  <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.6 }}>
+                    {steps.map((step, i) => (
+                      <li key={i} style={{ fontSize: "0.875rem", color: "#333", marginBottom: 4 }}>
+                        {step}
+                      </li>
+                    ))}
+                  </ol>
+                </Box>
+              );
+            }
+          }
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
               sx={{
                 whiteSpace: isExpanded ? "normal" : "nowrap",
                 overflow: isExpanded ? "visible" : "hidden",
@@ -654,7 +647,7 @@ export default function IndustryDataTable({
                 cursor: "pointer",
               }}
             >
-              {getValue() as React.ReactNode}
+              {rawValue}
             </Box>
           );
         },
@@ -670,10 +663,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 width: "100%",
                 cursor: "pointer",
@@ -699,10 +689,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 display: "flex",
                 flexWrap: isExpanded ? "wrap" : "nowrap",
@@ -725,10 +712,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 display: "flex",
                 flexWrap: isExpanded ? "wrap" : "nowrap",
@@ -751,10 +735,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 display: "flex",
                 flexWrap: isExpanded ? "wrap" : "nowrap",
@@ -777,10 +758,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 display: "flex",
                 flexWrap: isExpanded ? "wrap" : "nowrap",
@@ -803,10 +781,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 display: "flex",
                 flexWrap: isExpanded ? "wrap" : "nowrap",
@@ -829,10 +804,7 @@ export default function IndustryDataTable({
           const isExpanded = expandedRows.has(rowId);
           return (
             <Box
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleRowExpansion(rowId);
-              }}
+
               sx={{
                 display: "flex",
                 flexWrap: isExpanded ? "wrap" : "nowrap",
@@ -840,6 +812,7 @@ export default function IndustryDataTable({
               }}
             >
               <a
+                onClick={(e) => e.stopPropagation()}
                 style={{
                   textDecoration: "underline",
                   color: PURE_ORANGE,
@@ -858,7 +831,7 @@ export default function IndustryDataTable({
         },
       },
     ],
-    [expandedRows, CustomHeader, renderChips, toggleRowExpansion, filters, handleContactClick, aiMode, aiResultsMap]
+    [expandedRows, CustomHeader, renderChips, toggleRowExpansion, filters, handleContactClick]
   );
 
   // When AI mode is active use the ranked AI results; otherwise use the normally filtered data
@@ -1018,7 +991,7 @@ export default function IndustryDataTable({
             )}
             {aiMode && !aiLoading && aiResults.length > 0 && (
               <Typography variant="body2" sx={{ mt: 0.75, color: "#666", fontSize: "0.72rem" }}>
-                ✓ {aiResults.length} semantic matches — ranked by relevance, AI explanations in "Why Matched"
+                ✓ {aiResults.length} results found — ranked by relevance
               </Typography>
             )}
           </>
@@ -1247,6 +1220,7 @@ export default function IndustryDataTable({
                     key={row.id}
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
+                    onClick={() => toggleRowExpansion(row.original.Id)}
                     sx={{
                       display: "grid",
                       gridTemplateColumns: `50px ${columns
@@ -1261,6 +1235,7 @@ export default function IndustryDataTable({
                       backgroundColor: "#ffffff",
                       borderBottom: "1px solid #e0e0e0",
                       transition: "background-color 0.2s ease",
+                      cursor: "pointer",
                       "&:hover": {
                         backgroundColor: "#fafafa",
                       },
@@ -1476,6 +1451,34 @@ const FilterPopup = ({
                 </Typography>
               ) : (
                 <List dense>
+                  <ListItem disablePadding>
+                    <ListItemButton
+                      onClick={() => {
+                        setSelectedValues(
+                          filteredUniqueValues.length > 0 && selectedValues.size === filteredUniqueValues.length
+                            ? new Set()
+                            : new Set(filteredUniqueValues)
+                        );
+                      }}
+                      dense
+                    >
+                      <Checkbox
+                        checked={filteredUniqueValues.length > 0 && selectedValues.size === filteredUniqueValues.length}
+                        indeterminate={selectedValues.size > 0 && selectedValues.size < filteredUniqueValues.length}
+                        size="small"
+                        sx={{
+                          color: PURE_ORANGE,
+                          "&.Mui-checked": { color: PURE_ORANGE },
+                          "&.MuiCheckbox-indeterminate": { color: PURE_ORANGE },
+                        }}
+                      />
+                      <ListItemText
+                        primary="Select All"
+                        primaryTypographyProps={{ fontSize: "0.875rem", fontWeight: 600 }}
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                  <Divider />
                   {filteredUniqueValues.map((value) => (
                     <ListItem key={value} disablePadding>
                       <ListItemButton

@@ -141,7 +141,7 @@ createServer(async (req, res) => {
       const queryText = query.trim().slice(0, 1000);
       const safeLimit = Math.min(Math.max(1, Number(limit) || 10), 15);
 
-      const embFile = resolve(__dir, "../public/data/industry_use_cases_embeddings.json");
+      const embFile = resolve(__dir, "../public/data/pure_industry_use_cases_embeddings.json");
       const cached = loadLocalIndex(embFile, "item", "[IndustrySearchIndex]");
 
       if (!cached) {
@@ -200,7 +200,7 @@ createServer(async (req, res) => {
       const queryText = query.trim().slice(0, 1000);
       const safeLimit = Math.min(Math.max(1, Number(limit) || 10), 15);
 
-      const embFile = resolve(__dir, "../public/data/use_cases_embeddings.json");
+      const embFile = resolve(__dir, "../public/data/pure_use_cases_embeddings.json");
       const cached = loadLocalIndex(embFile, "useCase", "[SearchIndex]");
 
       if (!cached) {
