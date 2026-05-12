@@ -575,8 +575,10 @@ The Lambda reads both the Okta client ID and the OpenAI API key from a **single*
 }
 ```
 
-4. Give the secret a name, e.g. `aiuc/everpure`.
+4. Give the secret a name, e.g. `aiuc/okta` (this is the name used in the Everpure deployment — both Okta and OpenAI keys live in the same secret).
 5. Finish and save.
+
+> **Existing secret?** If you already have a secret (e.g. `aiuc/okta`) containing `OKTA_CLIENT_ID`, just **edit that secret** and add `EVERPURE_OPENAI_API_KEY` to it. No need to create a new one — the Lambda reads all keys from the single secret named by `AIUC_SECRET_NAME`.
 
 **IAM permission:** The Lambda's execution role needs:
 
@@ -584,7 +586,7 @@ The Lambda reads both the Okta client ID and the OpenAI API key from a **single*
 {
   "Effect": "Allow",
   "Action": "secretsmanager:GetSecretValue",
-  "Resource": "arn:aws:secretsmanager:us-east-2:YOUR_ACCOUNT_ID:secret:aiuc/everpure-*"
+  "Resource": "arn:aws:secretsmanager:us-east-2:YOUR_ACCOUNT_ID:secret:aiuc/okta-*"
 }
 ```
 
@@ -597,7 +599,7 @@ Set these in **AWS Lambda Console → Configuration → Environment variables**:
 | `BUCKET_NAME` | Your S3 bucket name |
 | `S3_REGION` | `us-east-2` (or your region) |
 | `DIST_PREFIX` | `dist` |
-| `AIUC_SECRET_NAME` | `aiuc/everpure` |
+| `AIUC_SECRET_NAME` | `aiuc/okta` |
 | `OKTA_ISSUER` | `https://YOUR_OKTA_DOMAIN.okta.com/oauth2/default` |
 | `OKTA_AUDIENCE` | `api://default` |
 | `USE_CASES_EMBEDDINGS_KEY` | `pure_use_cases_embeddings.json` |
@@ -699,7 +701,7 @@ Check CloudWatch logs for the Lambda. Common causes:
 ```
 Error: OpenAI API key not found in Secrets Manager or OPENAI_API_KEY env var
 ```
-→ Verify `AIUC_SECRET_NAME` is set correctly and the secret JSON contains `EVERPURE_OPENAI_API_KEY`.
+→ Verify `AIUC_SECRET_NAME` is set to the correct secret name (e.g. `aiuc/okta`). The secret JSON must contain `EVERPURE_OPENAI_API_KEY`. If your secret already exists with `OKTA_CLIENT_ID`, just add `EVERPURE_OPENAI_API_KEY` to that same secret — no new secret needed.
 
 **2. Lambda can't reach Secrets Manager:**
 → Check the Lambda IAM execution role has `secretsmanager:GetSecretValue` permission on the secret ARN.
