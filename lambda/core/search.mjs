@@ -135,3 +135,44 @@ export function runKeywordSearch(query, items, fields, topK) {
         .sort((a, b) => b.score - a.score)
         .slice(0, topK);
 }
+
+/**
+ * Hybrid search using Reciprocal Rank Fusion (RRF) to merge vector and keyword results.
+ * Casts a wider net from each method then re-ranks by combined RRF score so that
+ * both semantic intent and exact keyword matches are rewarded.
+ *
+ * @param {object} index - FlatIP index from createFlatIPIndex()
+ * @param {object[]} meta - Metadata array parallel to the index vectors
+ * @param {number[]} queryVec - Query embedding (raw, will be L2-normalised internally)
+ * @param {string} query - Original query string for keyword scoring
+ * @param {string[]} fields - Fields to search for keyword scoring
+ * @param {number} topK - Final number of results to return
+ * @returns {{ data: object, score: number }[]}
+ */
+export function runHybridSearch(index, meta, queryVec, query, fields, topK) {
+    const candidateK = Math.min(topK * 4, meta.length);
+
+    const vectorResults = runVectorSearch(index, meta, queryVec, candidateK);
+    const keywordResults = runKeywordSearch(query, meta, fields, candidateK);
+
+    // Build rank maps keyed by object reference — works because both searches
+    // return items directly from the shared meta array (no cloning).
+    const vectorRanks = new Map(vectorResults.map((r, i) => [r.data, i + 1]));
+    const keywordRanks = new Map(keywordResults.map((r, i) => [r.data, i + 1]));
+
+    // Union of all candidates from both lists
+    const allCandidates = new Set([
+        ...vectorResults.map(r => r.data),
+        ...keywordResults.map(r => r.data),
+    ]);
+
+    // RRF score = 1/(k+rank_vector) + 1/(k+rank_keyword); k=60 is standard
+    const k = 60;
+    const scored = [...allCandidates].map(data => {
+        const vRank = vectorRanks.get(data) ?? (candidateK + 1);
+        const kwRank = keywordRanks.get(data) ?? (candidateK + 1);
+        return { data, score: 1 / (k + vRank) + 1 / (k + kwRank) };
+    });
+
+    return scored.sort((a, b) => b.score - a.score).slice(0, topK);
+}

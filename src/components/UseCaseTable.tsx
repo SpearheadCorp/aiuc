@@ -60,8 +60,7 @@ import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import { useSearchApi } from "../hooks/useSearchApi";
 import type { UseCaseSearchResult, UseCaseRaw } from "../types";
 
-/** Extend UseCaseData with an optional "Why Matched" explanation for search results. */
-type UseCaseRow = UseCaseData & { _whyMatched?: string };
+type UseCaseRow = UseCaseData;
 
 /** Map a raw snake_case use-case object from the search API to the display shape. */
 function mapUseCaseRaw(raw: UseCaseRaw, idx: number): UseCaseRow {
@@ -353,10 +352,7 @@ export default function UseCaseTable({
   /** Data shown in the table: search results in search mode, full filtered set otherwise. */
   const tableData = useMemo<UseCaseRow[]>(() => {
     if (searchMode) {
-      return searchResults.map((r, i) => ({
-        ...mapUseCaseRaw(r.useCase, i),
-        _whyMatched: r.whyMatched,
-      }));
+      return searchResults.map((r, i) => mapUseCaseRaw(r.useCase, i));
     }
     return filteredData as UseCaseRow[];
   }, [searchMode, searchResults, filteredData]);
@@ -471,41 +467,6 @@ export default function UseCaseTable({
 
   const columns = useMemo<ColumnDef<UseCaseRow>[]>(
     () => [
-      // "Why Matched" column — only shown in AI search results mode
-      ...(searchMode ? [{
-        id: "_whyMatched",
-        accessorKey: "_whyMatched" as keyof UseCaseRow,
-        header: () => (
-          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-            <AutoAwesomeIcon sx={{ fontSize: 14, color: PURE_ORANGE }} />
-            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.8rem" }}>
-              Why Matched
-            </Typography>
-          </Box>
-        ),
-        size: 240,
-        minSize: 240,
-        enableSorting: false,
-        cell: ({ row }: { row: any }) => (
-          row.original._whyMatched ? (
-            <Box sx={{ py: 0.5, minWidth: 220 }}>
-              <Typography
-                variant="body2"
-                sx={{
-                  fontSize: "0.75rem",
-                  color: "#555",
-                  fontStyle: "italic",
-                  lineHeight: 1.5,
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                }}
-              >
-                {row.original._whyMatched}
-              </Typography>
-            </Box>
-          ) : null
-        ),
-      } as ColumnDef<UseCaseRow>] : []),
       {
         id: "contact",
         header: () => (
@@ -1107,7 +1068,7 @@ export default function UseCaseTable({
             {/* Results summary inside card */}
             {searchMode && !isSearching && (
               <Typography variant="body2" sx={{ color: "#555", fontSize: "0.72rem", mt: 0.75 }}>
-                ✓ {searchResults.length} semantic matches — ranked by relevance, AI explanations in "Why Matched"
+                ✓ {searchResults.length} results found — ranked by relevance
               </Typography>
             )}
           </>

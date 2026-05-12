@@ -75,11 +75,9 @@ export interface IndustryRaw {
 export interface UseCaseSearchResult {
     useCase: UseCaseRaw;
     score: number;
-    whyMatched: string;
 }
 
 export interface IndustrySearchResult {
     item: IndustryRaw;
     score: number;
-    whyMatched: string;
 }

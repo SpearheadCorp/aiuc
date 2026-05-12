@@ -61,8 +61,7 @@ import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import { useSearchApi } from "../hooks/useSearchApi";
 import type { IndustrySearchResult, IndustryRaw } from "../types";
 
-/** Extend IndustryData with an optional "Why Matched" explanation for search results. */
-type IndustryRow = IndustryData & { _whyMatched?: string };
+type IndustryRow = IndustryData;
 
 /** Map a raw snake_case industry item from the search API to the display shape. */
 function mapIndustryRaw(raw: IndustryRaw): IndustryRow {
@@ -346,10 +345,7 @@ export default function IndustryDataTable({
   /** Data shown in the table: search results in search mode, full filtered set otherwise. */
   const tableData = useMemo<IndustryRow[]>(() => {
     if (searchMode) {
-      return searchResults.map((r) => ({
-        ...mapIndustryRaw(r.item),
-        _whyMatched: r.whyMatched,
-      }));
+      return searchResults.map((r) => mapIndustryRaw(r.item));
     }
     return filteredData as IndustryRow[];
   }, [searchMode, searchResults, filteredData]);
@@ -464,41 +460,6 @@ export default function IndustryDataTable({
 
   const columns = useMemo<ColumnDef<IndustryRow>[]>(
     () => [
-      // "Why Matched" column — only shown in AI search results mode
-      ...(searchMode ? [{
-        id: "_whyMatched",
-        accessorKey: "_whyMatched" as keyof IndustryRow,
-        header: () => (
-          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-            <AutoAwesomeIcon sx={{ fontSize: 14, color: PURE_ORANGE }} />
-            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.8rem" }}>
-              Why Matched
-            </Typography>
-          </Box>
-        ),
-        size: 240,
-        minSize: 240,
-        enableSorting: false,
-        cell: ({ row }: { row: any }) => (
-          row.original._whyMatched ? (
-            <Box sx={{ py: 0.5, minWidth: 220 }}>
-              <Typography
-                variant="body2"
-                sx={{
-                  fontSize: "0.75rem",
-                  color: "#555",
-                  fontStyle: "italic",
-                  lineHeight: 1.5,
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                }}
-              >
-                {row.original._whyMatched}
-              </Typography>
-            </Box>
-          ) : null
-        ),
-      } as ColumnDef<IndustryRow>] : []),
       {
         id: "contact",
         header: () => (
@@ -1103,7 +1064,7 @@ export default function IndustryDataTable({
             {/* Results summary inside card */}
             {searchMode && !isSearching && (
               <Typography variant="body2" sx={{ color: "#555", fontSize: "0.72rem", mt: 0.75 }}>
-                ✓ {searchResults.length} semantic matches — ranked by relevance, AI explanations in "Why Matched"
+                ✓ {searchResults.length} results found — ranked by relevance
               </Typography>
             )}
           </>
