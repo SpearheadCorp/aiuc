@@ -116,7 +116,21 @@ function App() {
 
         {/* Main Content Area — both tabs stay mounted so AI results/filters survive tab switches */}
         <Box sx={{ flex: 1, overflow: "hidden", flexDirection: "column", p: 3, display: activeTab === 0 ? "flex" : "none" }}>
-          <Box sx={{ mb: 1.5 }}>
+          <Box sx={{ mb: 1 }}>
+            <Typography
+              variant="body2"
+              sx={{
+                color: "#444",
+                fontSize: "0.875rem",
+                lineHeight: 1.6,
+                fontStyle: "italic",
+                borderLeft: `3px solid ${PURE_ORANGE}`,
+                pl: 1.5,
+                mb: 1,
+              }}
+            >
+              An internal library of curated AI use cases spanning industries and business functions — with implementation details, expected outcomes, tools, and frameworks to help your team discover and act on AI opportunities faster.
+            </Typography>
             <Typography variant="body2" sx={{ color: "#666", fontSize: "0.82rem" }}>
               Need help getting started?{" "}
               <Link

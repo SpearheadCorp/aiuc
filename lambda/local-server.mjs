@@ -17,8 +17,7 @@ import { fileURLToPath } from "url";
 import OpenAI from "openai";
 
 import { getEmbedding, l2normalize } from "./core/embeddings.mjs";
-import { createFlatIPIndex, runVectorSearch, runKeywordSearch, USE_CASE_FIELDS, INDUSTRY_FIELDS } from "./core/search.mjs";
-import { generateExplanations, FALLBACK_WHY } from "./core/why_matched.mjs";
+import { createFlatIPIndex, runHybridSearch, runKeywordSearch, extractQuerySignals, USE_CASE_FIELDS, INDUSTRY_FIELDS } from "./core/search.mjs";
 import { ENABLE_AI_SEARCH } from "./core/ai_toggle.mjs";
 
 // ── Load .env.local from project root ────────────────────────────────────────
@@ -151,38 +150,31 @@ createServer(async (req, res) => {
       }
 
       const { index, meta } = cached;
+      const { cleanedQuery, quotedPhrases, boostedFields, fieldExcludeTerms } = extractQuerySignals(queryText);
+      const searchOpts = { quotedPhrases, boostedFields, fieldExcludeTerms };
       let results;
       let searchMode;
 
       if (ENABLE_AI_SEARCH) {
         try {
-          const queryVec = await getEmbedding(queryText, openai);
-          results = runVectorSearch(index, meta, queryVec, safeLimit);
-          searchMode = "vector";
+          const queryVec = await getEmbedding(cleanedQuery, openai);
+          results = runHybridSearch(index, meta, queryVec, queryText, INDUSTRY_FIELDS, safeLimit, searchOpts);
+          searchMode = "hybrid";
         } catch (err) {
           console.warn(`[IndustrySearch] embedding failed → keyword fallback: ${err.message}`);
-          results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit);
+          results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit, searchOpts);
           searchMode = "keyword-fallback";
         }
       } else {
-        results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit);
+        results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit, searchOpts);
         searchMode = "keyword";
       }
 
-      const items = results.map(r => r.data);
-      const explanations = await generateExplanations(
-        queryText,
-        items,
-        item => `"${item.ai_use_case || ""}" — ${item.industry || ""} / ${item.business_function || ""}: ${item.description || ""}`,
-        openai
-      );
-
       console.log(`[IndustrySearch] mode=${searchMode} "${queryText.slice(0, 60)}…" → ${results.length} results`);
       return sendJson(res, 200, {
-        results: results.map((r, i) => ({
+        results: results.map(r => ({
           item: r.data,
           score: r.score,
-          whyMatched: explanations[i] || FALLBACK_WHY,
         })),
       });
     } catch (err) {
@@ -210,38 +202,31 @@ createServer(async (req, res) => {
       }
 
       const { index, meta } = cached;
+      const { cleanedQuery, quotedPhrases, boostedFields, fieldExcludeTerms } = extractQuerySignals(queryText);
+      const searchOpts = { quotedPhrases, boostedFields, fieldExcludeTerms };
       let results;
       let searchMode;
 
       if (ENABLE_AI_SEARCH) {
         try {
-          const queryVec = await getEmbedding(queryText, openai);
-          results = runVectorSearch(index, meta, queryVec, safeLimit);
-          searchMode = "vector";
+          const queryVec = await getEmbedding(cleanedQuery, openai);
+          results = runHybridSearch(index, meta, queryVec, queryText, USE_CASE_FIELDS, safeLimit, searchOpts);
+          searchMode = "hybrid";
         } catch (err) {
           console.warn(`[Search] embedding failed → keyword fallback: ${err.message}`);
-          results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit);
+          results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit, searchOpts);
           searchMode = "keyword-fallback";
         }
       } else {
-        results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit);
+        results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit, searchOpts);
         searchMode = "keyword";
       }
 
-      const useCases = results.map(r => r.data);
-      const explanations = await generateExplanations(
-        queryText,
-        useCases,
-        uc => `"${uc.ai_use_case || ""}" — ${uc.business_function || ""} / ${uc.business_capability || ""}: ${uc.action_implementation || ""}`,
-        openai
-      );
-
       console.log(`[Search] mode=${searchMode} "${queryText.slice(0, 60)}…" → ${results.length} results`);
       return sendJson(res, 200, {
-        results: results.map((r, i) => ({
+        results: results.map(r => ({
           useCase: r.data,
           score: r.score,
-          whyMatched: explanations[i] || FALLBACK_WHY,
         })),
       });
     } catch (err) {

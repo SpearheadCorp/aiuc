@@ -11,7 +11,7 @@
 
 import { createHash } from "crypto";
 import { getEmbedding } from "./embeddings.mjs";
-import { loadSearchIndex, runHybridSearch, runKeywordSearch, USE_CASE_FIELDS, INDUSTRY_FIELDS } from "./search.mjs";
+import { loadSearchIndex, runHybridSearch, runKeywordSearch, extractQuerySignals, USE_CASE_FIELDS, INDUSTRY_FIELDS } from "./search.mjs";
 import { ENABLE_AI_SEARCH } from "./ai_toggle.mjs";
 
 /**
@@ -32,21 +32,26 @@ export async function handleUseCaseSearch({ query, limit, s3Client, bucket, embe
 
     const { index, meta } = await loadSearchIndex(s3Client, bucket, embeddingsKey, "useCase", "[SearchIndex]");
 
+    const { cleanedQuery, quotedPhrases, boostedFields, fieldExcludeTerms } = extractQuerySignals(queryText);
+    const searchOpts = { quotedPhrases, boostedFields, fieldExcludeTerms };
+    const safeClean = cleanedQuery.replace(/[\r\n\t]/g, " ").slice(0, 200);
+    console.log(`[Search] cleaned="${safeClean}" quoted=${JSON.stringify(quotedPhrases)} boosted=${JSON.stringify(boostedFields)}`);
+
     let results;
     let searchMode;
 
     if (ENABLE_AI_SEARCH) {
         try {
-            const queryVec = await getEmbedding(queryText, openaiClient);
-            results = runHybridSearch(index, meta, queryVec, queryText, USE_CASE_FIELDS, safeLimit);
+            const queryVec = await getEmbedding(cleanedQuery, openaiClient);
+            results = runHybridSearch(index, meta, queryVec, queryText, USE_CASE_FIELDS, safeLimit, searchOpts);
             searchMode = "hybrid";
         } catch (err) {
             console.warn(`[Search] embedding failed → keyword fallback: ${err.message}`);
-            results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit);
+            results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit, searchOpts);
             searchMode = "keyword-fallback";
         }
     } else {
-        results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit);
+        results = runKeywordSearch(queryText, meta, USE_CASE_FIELDS, safeLimit, searchOpts);
         searchMode = "keyword";
     }
 
@@ -78,21 +83,26 @@ export async function handleIndustrySearch({ query, limit, s3Client, bucket, ind
 
     const { index, meta } = await loadSearchIndex(s3Client, bucket, industryEmbeddingsKey, "item", "[IndustrySearchIndex]");
 
+    const { cleanedQuery, quotedPhrases, boostedFields, fieldExcludeTerms } = extractQuerySignals(queryText);
+    const searchOpts = { quotedPhrases, boostedFields, fieldExcludeTerms };
+    const safeClean = cleanedQuery.replace(/[\r\n\t]/g, " ").slice(0, 200);
+    console.log(`[IndustrySearch] cleaned="${safeClean}" quoted=${JSON.stringify(quotedPhrases)} boosted=${JSON.stringify(boostedFields)}`);
+
     let results;
     let searchMode;
 
     if (ENABLE_AI_SEARCH) {
         try {
-            const queryVec = await getEmbedding(queryText, openaiClient);
-            results = runHybridSearch(index, meta, queryVec, queryText, INDUSTRY_FIELDS, safeLimit);
+            const queryVec = await getEmbedding(cleanedQuery, openaiClient);
+            results = runHybridSearch(index, meta, queryVec, queryText, INDUSTRY_FIELDS, safeLimit, searchOpts);
             searchMode = "hybrid";
         } catch (err) {
             console.warn(`[IndustrySearch] embedding failed → keyword fallback: ${err.message}`);
-            results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit);
+            results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit, searchOpts);
             searchMode = "keyword-fallback";
         }
     } else {
-        results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit);
+        results = runKeywordSearch(queryText, meta, INDUSTRY_FIELDS, safeLimit, searchOpts);
         searchMode = "keyword";
     }
 

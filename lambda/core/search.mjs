@@ -130,68 +130,173 @@ const STOP_WORDS = new Set([
     "me", "looking", "look",
 ]);
 
+// Field-reference patterns: "as <field>" / "in <field>" tell us WHERE to search,
+// but the field-label words themselves ("expected", "outcome", "action") must not
+// be scored as content terms — every record has them in its field values.
+const FIELD_REFERENCE_RULES = [
+    {
+        pattern: /\b(?:as|in(?:\s+the)?)\s+expected\s+(?:outcome|result)s?\b/i,
+        field: "expected_outcomes_and_results",
+        terms: ["expected", "outcome", "outcomes", "result", "results"],
+    },
+    {
+        pattern: /\b(?:as|in(?:\s+the)?)\s+(?:action|implementation)\b/i,
+        field: "action_implementation",
+        terms: ["action", "implementation"],
+    },
+    {
+        pattern: /\b(?:as|in(?:\s+the)?)\s+business\s+function\b/i,
+        field: "business_function",
+        terms: ["function"],  // "business" is a real content term — keep it
+    },
+    {
+        pattern: /\b(?:as|in(?:\s+the)?)\s+(?:business\s+)?capability\b/i,
+        field: "business_capability",
+        terms: ["capability"],  // "business" is a real content term — keep it
+    },
+    {
+        pattern: /\b(?:as|in(?:\s+the)?)\s+stakeholder\b/i,
+        field: "stakeholder_or_user",
+        terms: ["stakeholder"],
+    },
+    {
+        pattern: /\b(?:as|in(?:\s+the)?)\s+ai\s+(?:tool|model)s?\b/i,
+        field: "ai_tools_models",
+        terms: [],  // "tool" and "model" are real content terms users search for
+    },
+    {
+        pattern: /\b(?:as|in(?:\s+the)?)\s+(?:digital\s+)?platform\b/i,
+        field: "ai_tools_platforms",
+        terms: ["platform", "platforms"],  // "digital" is a real content term — keep it
+    },
+    {
+        pattern: /\b(?:as|in(?:\s+the)?)\s+industry\b/i,
+        field: "industry",
+        terms: ["industry"],
+    },
+];
+
+/**
+ * Parse a raw user query into structured search signals.
+ *
+ * Handles three common query patterns that confuse naive term-frequency search:
+ *   1. Quoted phrases — "targeted campaigns" → exact-match with a large bonus
+ *   2. Command framing — "filter all use cases with X" → strip the scaffolding before embedding
+ *   3. Field references — "as expected outcome" → boost that field, exclude the label words
+ *      from content scoring (they appear in every record's field value and add noise)
+ *
+ * @param {string} rawQuery
+ * @returns {{
+ *   cleanedQuery: string,      // stripped query suitable for embedding
+ *   quotedPhrases: string[],   // exact phrases extracted from quotes
+ *   boostedFields: string[],   // field names to prioritise in keyword scoring
+ *   fieldExcludeTerms: Set<string>, // label words to drop from term scoring
+ * }}
+ */
+export function extractQuerySignals(rawQuery) {
+    const quotedPhrases = [];
+
+    // Pull out double-quoted phrases, keep the words in the text for embedding.
+    let q = rawQuery.replace(/"([^"]+)"/g, (_, phrase) => {
+        quotedPhrases.push(phrase.toLowerCase().trim());
+        return ` ${phrase} `;
+    });
+    // Pull out single-quoted phrases — require word boundary before/after so
+    // apostrophes in contractions ("it's", "campaign's") don't open a phrase.
+    q = q.replace(/(?<!\w)'([^']{2,})'(?!\w)/g, (_, phrase) => {
+        quotedPhrases.push(phrase.toLowerCase().trim());
+        return ` ${phrase} `;
+    });
+
+    // Detect field-reference patterns: "as expected outcome", "in the action", etc.
+    const boostedFields = [];
+    const fieldExcludeTerms = new Set();
+    for (const { pattern, field, terms } of FIELD_REFERENCE_RULES) {
+        if (pattern.test(rawQuery)) {
+            boostedFields.push(field);
+            terms.forEach(t => fieldExcludeTerms.add(t));
+            q = q.replace(pattern, " ");
+        }
+    }
+
+    // Strip command-framing prefix so the embedding focuses on intent, not the instruction.
+    q = q.replace(
+        /^(filter|show|find|get|list|display|give\s+me|search\s+for|look\s+for)\s+(all\s+)?(use\s+cases?|cases?|results?|items?|rows?)?\s*(with|that\s+have?|where|having|for|by|of|containing)?\s*/i,
+        " "
+    ).trim();
+
+    const cleanedQuery = q.trim() || rawQuery.trim();
+
+    return { cleanedQuery, quotedPhrases, boostedFields, fieldExcludeTerms };
+}
+
 /**
  * Keyword fallback: score items by term-frequency across specified fields.
  * Used when ENABLE_AI_SEARCH=false or when embedding fails.
  *
- * Improvements over binary word matching:
- * - Stop words are filtered so generic query scaffolding ("filter all use cases with…")
- *   doesn't inflate scores on unrelated records.
- * - Term-frequency counting (not binary) rewards items that mention key terms often.
- * - Phrase-match bonus: consecutive meaningful terms found together as a substring
- *   get a score boost equal to 3× the number of query terms, pulling exact-phrase
- *   matches to the top.
+ * Scoring strategy:
+ * - Stop words filtered so generic scaffolding ("filter all use cases with…") doesn't inflate scores.
+ * - fieldExcludeTerms drops field-label words ("expected", "outcome") that appear in every record.
+ * - Term-frequency counting rewards items that mention key terms often.
+ * - quotedPhrases get a large exact-match bonus (10× terms), pulling them to the top.
+ * - boostedFields are scored with 3× weight vs. the general haystack.
  *
- * @param {string} query - User query string
- * @param {object[]} items - Dataset items to search through
- * @param {string[]} fields - Item fields to include in the search haystack
- * @param {number} topK - Maximum number of results
+ * @param {string} query
+ * @param {object[]} items
+ * @param {string[]} fields
+ * @param {number} topK
+ * @param {{ quotedPhrases?: string[], boostedFields?: string[], fieldExcludeTerms?: Set<string> }} [opts]
  * @returns {{ data: object, score: number }[]}
  */
-export function runKeywordSearch(query, items, fields, topK) {
-    const rawTokens = query.toLowerCase().split(/\s+/).filter(t => t.length > 1);
-    const terms = rawTokens.filter(t => !STOP_WORDS.has(t));
-    // If every token was a stop word, fall back to all tokens so we still return something.
-    const searchTerms = terms.length > 0 ? terms : rawTokens;
-    if (searchTerms.length === 0) return [];
+export function runKeywordSearch(query, items, fields, topK, opts = {}) {
+    const { quotedPhrases = [], boostedFields = [], fieldExcludeTerms = new Set() } = opts;
 
-    // Build meaningful phrases: runs of 2+ consecutive non-stop tokens in the original query.
-    const phrases = [];
+    const rawTokens = query.toLowerCase().split(/\s+/).filter(t => t.length > 1);
+    const terms = rawTokens.filter(t => !STOP_WORDS.has(t) && !fieldExcludeTerms.has(t));
+    const searchTerms = terms.length > 0 ? terms : rawTokens.filter(t => !fieldExcludeTerms.has(t));
+    if (searchTerms.length === 0 && quotedPhrases.length === 0) return [];
+
+    // Build implicit phrases from consecutive non-stop tokens.
+    const implicitPhrases = [];
     let run = [];
     for (const token of rawTokens) {
-        if (!STOP_WORDS.has(token)) {
+        if (!STOP_WORDS.has(token) && !fieldExcludeTerms.has(token)) {
             run.push(token);
         } else {
-            if (run.length >= 2) phrases.push(run.join(" "));
+            if (run.length >= 2) implicitPhrases.push(run.join(" "));
             run = [];
         }
     }
-    if (run.length >= 2) phrases.push(run.join(" "));
-    // Also add the full search-term sequence if it wasn't already captured.
+    if (run.length >= 2) implicitPhrases.push(run.join(" "));
     if (searchTerms.length >= 2) {
         const full = searchTerms.join(" ");
-        if (!phrases.includes(full)) phrases.push(full);
+        if (!implicitPhrases.includes(full)) implicitPhrases.push(full);
     }
-    // Cap phrases to avoid O(phrases × items) blowup on adversarial long queries.
-    const cappedPhrases = phrases.slice(0, 20);
+    const cappedImplicit = implicitPhrases.slice(0, 20);
 
-    const phraseBonus = searchTerms.length * 3;
+    // Quoted phrases get a much larger bonus than implicit phrase runs.
+    const implicitBonus = Math.max(searchTerms.length * 3, 3);
+    const quotedBonus = Math.max(searchTerms.length * 10, 10);
+
+    const boostedSet = new Set(boostedFields);
 
     return items
         .map(item => {
-            const haystack = fields.map(f => String(item[f] || "")).join(" ").toLowerCase();
-
-            // Term-frequency score: count occurrences of each meaningful term.
-            let score = searchTerms.reduce((s, t) => {
-                let count = 0;
-                let pos = haystack.indexOf(t);
-                while (pos !== -1) { count++; pos = haystack.indexOf(t, pos + 1); }
-                return s + count;
-            }, 0);
-
-            // Phrase-match bonus: exact phrase appearing in the haystack is a strong signal.
-            for (const phrase of cappedPhrases) {
-                if (haystack.includes(phrase)) score += phraseBonus;
+            let score;
+            if (boostedSet.size > 0) {
+                // Split fields so boosted content isn't double-counted in both haystacks.
+                // boosted fields → 3×, everything else → 1×
+                const primaryHaystack = fields
+                    .filter(f => boostedSet.has(f))
+                    .map(f => String(item[f] || "")).join(" ").toLowerCase();
+                const secondaryHaystack = fields
+                    .filter(f => !boostedSet.has(f))
+                    .map(f => String(item[f] || "")).join(" ").toLowerCase();
+                score = _scoreHaystack(secondaryHaystack, searchTerms, cappedImplicit, quotedPhrases, implicitBonus, quotedBonus)
+                      + _scoreHaystack(primaryHaystack, searchTerms, cappedImplicit, quotedPhrases, implicitBonus, quotedBonus) * 3;
+            } else {
+                const haystack = fields.map(f => String(item[f] || "")).join(" ").toLowerCase();
+                score = _scoreHaystack(haystack, searchTerms, cappedImplicit, quotedPhrases, implicitBonus, quotedBonus);
             }
 
             return { data: item, score };
@@ -199,6 +304,22 @@ export function runKeywordSearch(query, items, fields, topK) {
         .filter(r => r.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, topK);
+}
+
+function _scoreHaystack(haystack, searchTerms, implicitPhrases, quotedPhrases, implicitBonus, quotedBonus) {
+    let score = searchTerms.reduce((s, t) => {
+        let count = 0;
+        let pos = haystack.indexOf(t);
+        while (pos !== -1) { count++; pos = haystack.indexOf(t, pos + 1); }
+        return s + count;
+    }, 0);
+    for (const phrase of implicitPhrases) {
+        if (haystack.includes(phrase)) score += implicitBonus;
+    }
+    for (const phrase of quotedPhrases) {
+        if (haystack.includes(phrase)) score += quotedBonus;
+    }
+    return score;
 }
 
 /**
@@ -212,13 +333,14 @@ export function runKeywordSearch(query, items, fields, topK) {
  * @param {string} query - Original query string for keyword scoring
  * @param {string[]} fields - Fields to search for keyword scoring
  * @param {number} topK - Final number of results to return
+ * @param {{ quotedPhrases?: string[], boostedFields?: string[], fieldExcludeTerms?: Set<string> }} [opts]
  * @returns {{ data: object, score: number }[]}
  */
-export function runHybridSearch(index, meta, queryVec, query, fields, topK) {
+export function runHybridSearch(index, meta, queryVec, query, fields, topK, opts = {}) {
     const candidateK = Math.min(topK * 4, meta.length);
 
     const vectorResults = runVectorSearch(index, meta, queryVec, candidateK);
-    const keywordResults = runKeywordSearch(query, meta, fields, candidateK);
+    const keywordResults = runKeywordSearch(query, meta, fields, candidateK, opts);
 
     // Build rank maps keyed by object reference — works because both searches
     // return items directly from the shared meta array (no cloning).
