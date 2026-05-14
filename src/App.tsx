@@ -190,6 +190,35 @@ function App() {
           </Box>
         </Box>
 
+        {/* Description strip */}
+        <Box sx={{ px: 4, pt: 1.25, pb: 1.25, bgcolor: "#ffffff", borderBottom: "1px solid #e8e8e8" }}>
+          <Typography
+            variant="body2"
+            sx={{
+              color: "#444",
+              fontSize: "0.875rem",
+              lineHeight: 1.5,
+              fontStyle: "italic",
+              borderLeft: `3px solid ${PURE_ORANGE}`,
+              pl: 1.5,
+              mb: 0.5,
+            }}
+          >
+            An internal library of curated AI use cases spanning industries and business functions — with implementation details, expected outcomes, tools, and frameworks to help your team discover and act on AI opportunities faster.
+          </Typography>
+          <Typography variant="body2" sx={{ color: "#555", fontSize: "0.85rem", pl: 1.5 }}>
+            Need help getting started?{" "}
+            <Link
+              component="button"
+              underline="hover"
+              onClick={() => setActiveTab(2)}
+              sx={{ color: PURE_ORANGE, fontWeight: 500, fontSize: "0.85rem", cursor: "pointer", verticalAlign: "baseline" }}
+            >
+              Visit our How to Use tab.
+            </Link>
+          </Typography>
+        </Box>
+
         {/* Tabs Bar */}
         <Box sx={{ borderBottom: 1, borderColor: "divider", bgcolor: "background.paper", px: 4 }}>
           <Tabs
@@ -225,18 +254,7 @@ function App() {
           ) : (
             <>
               {activeTab === 0 && (
-                <>
-                  <Typography variant="body2" sx={{ mb: 1.5, color: "#555", fontSize: "0.85rem" }}>
-                    Need help getting started?{" "}
-                    <Link
-                      component="button"
-                      underline="hover"
-                      onClick={() => setActiveTab(2)}
-                      sx={{ color: PURE_ORANGE, fontWeight: 500, fontSize: "0.85rem", cursor: "pointer", verticalAlign: "baseline" }}
-                    >
-                      Visit our How to Use tab.
-                    </Link>
-                  </Typography>
+                <Box sx={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
                   <UseCaseTable
                     data={useCaseData}
                     loading={loadingUseCase}
@@ -244,173 +262,173 @@ function App() {
                     userEmail={userEmail}
                     isRegistered={isRegistered}
                   />
-                </>
-              )}
-              {activeTab === 1 && (
-                <IndustryDataTable
-                  data={industryData}
-                  loading={loadingIndustry}
-                  error={errorIndustry}
-                  userEmail={userEmail}
-                  isRegistered={isRegistered}
-                />
-              )}
-              {activeTab === 2 && (
-                <Box
-                  id="tabpanel-2"
-                  role="tabpanel"
-                  sx={{ flex: 1, overflowY: "auto", px: 3, py: 3 }}
-                >
-                  <Box sx={{ maxWidth: 760, mx: "auto" }}>
-
-                    {/* Intro */}
-                    <Typography variant="h5" sx={{ fontWeight: 700, mb: 1, color: "#1a1a1a" }}>
-                      About the AI Use Case Library
-                    </Typography>
-                    <Typography variant="body1" sx={{ color: "#555", lineHeight: 1.8, mb: 4 }}>
-                      An internal library of curated AI use cases spanning industries and business
-                      functions — with implementation details, expected outcomes, tools, and frameworks
-                      to help your team discover and act on AI opportunities faster.
-                    </Typography>
-
-                    {/* Feature cards */}
-                    <Typography variant="h6" sx={{ fontWeight: 700, mb: 2, color: "#1a1a1a" }}>
-                      What's Inside
-                    </Typography>
-                    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, mb: 4 }}>
-                      <Paper sx={{ p: 2.5, border: "1px solid #e8e8e8", boxShadow: "none" }}>
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-                          <ArticleIcon sx={{ color: PURE_ORANGE, fontSize: 22 }} />
-                          <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#1a1a1a" }}>
-                            Business Functions
-                          </Typography>
-                        </Box>
-                        <Typography variant="body2" sx={{ color: "#555", lineHeight: 1.7 }}>
-                          Browse detailed AI use cases with full implementation context — outcomes, datasets, tools, and more.
-                        </Typography>
-                      </Paper>
-                      <Paper sx={{ p: 2.5, border: "1px solid #e8e8e8", boxShadow: "none" }}>
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-                          <BarChartIcon sx={{ color: PURE_ORANGE, fontSize: 22 }} />
-                          <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#1a1a1a" }}>
-                            Industry
-                          </Typography>
-                        </Box>
-                        <Typography variant="body2" sx={{ color: "#555", lineHeight: 1.7 }}>
-                          Filter and explore use cases by industry, business function, or AI capability in a structured view.
-                        </Typography>
-                      </Paper>
-                    </Box>
-
-                    {/* Navigation steps */}
-                    <Typography variant="h6" sx={{ fontWeight: 700, mb: 2, color: "#1a1a1a" }}>
-                      How to Navigate
-                    </Typography>
-                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, mb: 4 }}>
-                      {[
-                        { icon: <ArticleIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <><strong>Business Functions</strong> tab — browse AI use cases with full context.</> },
-                        { icon: <BarChartIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <><strong>Industry</strong> tab — filter and explore by industry, function, or capability.</> },
-                        { icon: <UnfoldMoreIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Click any row to expand and see detailed information.</> },
-                        { icon: <FilterListIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Use the column filter icons to narrow down results.</> },
-                        { icon: <LockOpenIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Register to unlock additional columns and AI-powered semantic search.</> },
-                      ].map((step, i) => (
-                        <Box
-                          key={i}
-                          sx={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 1.5,
-                            backgroundColor: "#f8faff",
-                            borderRadius: "6px",
-                            px: 2,
-                            py: 1.5,
-                          }}
-                        >
-                          <Box
-                            sx={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              width: 26,
-                              height: 26,
-                              borderRadius: "50%",
-                              backgroundColor: "#e0edfd",
-                              flexShrink: 0,
-                            }}
-                          >
-                            <Typography variant="caption" sx={{ fontWeight: 700, color: PURE_ORANGE, lineHeight: 1 }}>
-                              {i + 1}
-                            </Typography>
-                          </Box>
-                          {step.icon}
-                          <Typography variant="body2" sx={{ color: "#444", lineHeight: 1.7 }}>
-                            {step.text}
-                          </Typography>
-                        </Box>
-                      ))}
-                    </Box>
-
-                    {/* CTA */}
-                    <Box
-                      sx={{
-                        border: `1.5px solid ${PURE_ORANGE}`,
-                        borderRadius: "8px",
-                        backgroundColor: "#f0f6ff",
-                        p: 3,
-                      }}
-                    >
-                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1, color: "#1a1a1a" }}>
-                        Request Help / Express Interest
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: "#555", mb: 2, lineHeight: 1.7 }}>
-                        Have a question about a specific use case? Want to explore how AI can help your team?
-                        Reach out — we'd love to help you get started.
-                      </Typography>
-                      <Link
-                        href={`mailto:${APP_CONFIG.contactEmail}`}
-                        underline="none"
-                        sx={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 0.75,
-                          backgroundColor: PURE_ORANGE,
-                          color: "#fff",
-                          fontWeight: 600,
-                          fontSize: "0.875rem",
-                          px: 2.5,
-                          py: 1,
-                          borderRadius: "4px",
-                          "&:hover": { backgroundColor: "#1a6bbf" },
-                        }}
-                      >
-                        <EmailIcon sx={{ fontSize: 16 }} />
-                        Contact Us at {APP_CONFIG.contactEmail}
-                      </Link>
-                    </Box>
-
-                  </Box>
                 </Box>
               )}
-            </>
-          )}
-        </Box>
+                    {activeTab === 1 && (
+                      <IndustryDataTable
+                        data={industryData}
+                        loading={loadingIndustry}
+                        error={errorIndustry}
+                        userEmail={userEmail}
+                        isRegistered={isRegistered}
+                      />
+                    )}
+                    {activeTab === 2 && (
+                      <Box
+                        id="tabpanel-2"
+                        role="tabpanel"
+                        sx={{ flex: 1, overflowY: "auto", px: 3, py: 3 }}
+                      >
+                        <Box sx={{ maxWidth: 760, mx: "auto" }}>
 
-        {/* Footer */}
-        <Box
-          sx={{
-            backgroundColor: "#ffffff",
-            borderTop: `1px solid ${PURE_ORANGE}`,
-            padding: "0px 32px",
-            display: "flex",
-            height: "50px",
-            alignItems: "center",
-            justifyContent: "space-between",
-            zIndex: 100,
-          }}
-        >
-          {/* Left side - Powered by */}
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flex: 1 }}>
-            {/* <Typography
+                          {/* Intro */}
+                          <Typography variant="h5" sx={{ fontWeight: 700, mb: 1, color: "#1a1a1a" }}>
+                            About the AI Use Case Library
+                          </Typography>
+                          <Typography variant="body1" sx={{ color: "#555", lineHeight: 1.8, mb: 4 }}>
+                            An internal library of curated AI use cases spanning industries and business
+                            functions — with implementation details, expected outcomes, tools, and frameworks
+                            to help your team discover and act on AI opportunities faster.
+                          </Typography>
+
+                          {/* Feature cards */}
+                          <Typography variant="h6" sx={{ fontWeight: 700, mb: 2, color: "#1a1a1a" }}>
+                            What's Inside
+                          </Typography>
+                          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, mb: 4 }}>
+                            <Paper sx={{ p: 2.5, border: "1px solid #e8e8e8", boxShadow: "none" }}>
+                              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                                <ArticleIcon sx={{ color: PURE_ORANGE, fontSize: 22 }} />
+                                <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#1a1a1a" }}>
+                                  Business Functions
+                                </Typography>
+                              </Box>
+                              <Typography variant="body2" sx={{ color: "#555", lineHeight: 1.7 }}>
+                                Browse detailed AI use cases with full implementation context — outcomes, datasets, tools, and more.
+                              </Typography>
+                            </Paper>
+                            <Paper sx={{ p: 2.5, border: "1px solid #e8e8e8", boxShadow: "none" }}>
+                              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                                <BarChartIcon sx={{ color: PURE_ORANGE, fontSize: 22 }} />
+                                <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#1a1a1a" }}>
+                                  Industry
+                                </Typography>
+                              </Box>
+                              <Typography variant="body2" sx={{ color: "#555", lineHeight: 1.7 }}>
+                                Filter and explore use cases by industry, business function, or AI capability in a structured view.
+                              </Typography>
+                            </Paper>
+                          </Box>
+
+                          {/* Navigation steps */}
+                          <Typography variant="h6" sx={{ fontWeight: 700, mb: 2, color: "#1a1a1a" }}>
+                            How to Navigate
+                          </Typography>
+                          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, mb: 4 }}>
+                            {[
+                              { icon: <ArticleIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <><strong>Business Functions</strong> tab — browse AI use cases with full context.</> },
+                              { icon: <BarChartIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <><strong>Industry</strong> tab — filter and explore by industry, function, or capability.</> },
+                              { icon: <UnfoldMoreIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Click any row to expand and see detailed information.</> },
+                              { icon: <FilterListIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Use the column filter icons to narrow down results.</> },
+                              { icon: <LockOpenIcon sx={{ fontSize: 18, color: PURE_ORANGE }} />, text: <>Register to unlock additional columns and AI-powered semantic search.</> },
+                            ].map((step, i) => (
+                              <Box
+                                key={i}
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 1.5,
+                                  backgroundColor: "#f8faff",
+                                  borderRadius: "6px",
+                                  px: 2,
+                                  py: 1.5,
+                                }}
+                              >
+                                <Box
+                                  sx={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    width: 26,
+                                    height: 26,
+                                    borderRadius: "50%",
+                                    backgroundColor: "#e0edfd",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <Typography variant="caption" sx={{ fontWeight: 700, color: PURE_ORANGE, lineHeight: 1 }}>
+                                    {i + 1}
+                                  </Typography>
+                                </Box>
+                                {step.icon}
+                                <Typography variant="body2" sx={{ color: "#444", lineHeight: 1.7 }}>
+                                  {step.text}
+                                </Typography>
+                              </Box>
+                            ))}
+                          </Box>
+
+                          {/* CTA */}
+                          <Box
+                            sx={{
+                              border: `1.5px solid ${PURE_ORANGE}`,
+                              borderRadius: "8px",
+                              backgroundColor: "#f0f6ff",
+                              p: 3,
+                            }}
+                          >
+                            <Typography variant="h6" sx={{ fontWeight: 700, mb: 1, color: "#1a1a1a" }}>
+                              Request Help / Express Interest
+                            </Typography>
+                            <Typography variant="body2" sx={{ color: "#555", mb: 2, lineHeight: 1.7 }}>
+                              Have a question about a specific use case? Want to explore how AI can help your team?
+                              Reach out — we'd love to help you get started.
+                            </Typography>
+                            <Link
+                              href={`mailto:${APP_CONFIG.contactEmail}`}
+                              underline="none"
+                              sx={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 0.75,
+                                backgroundColor: PURE_ORANGE,
+                                color: "#fff",
+                                fontWeight: 600,
+                                fontSize: "0.875rem",
+                                px: 2.5,
+                                py: 1,
+                                borderRadius: "4px",
+                                "&:hover": { backgroundColor: "#1a6bbf" },
+                              }}
+                            >
+                              <EmailIcon sx={{ fontSize: 16 }} />
+                              Contact Us at {APP_CONFIG.contactEmail}
+                            </Link>
+                          </Box>
+
+                        </Box>
+                      </Box>
+                    )}
+                  </>
+          )}
+                </Box>
+
+              {/* Footer */}
+              <Box
+                sx={{
+                  backgroundColor: "#ffffff",
+                  borderTop: `1px solid ${PURE_ORANGE}`,
+                  padding: "0px 32px",
+                  display: "flex",
+                  height: "50px",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  zIndex: 100,
+                }}
+              >
+                {/* Left side - Powered by */}
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flex: 1 }}>
+                  {/* <Typography
               variant="body2"
               sx={{ color: "#666666", fontSize: "0.75rem" }}
             >
@@ -430,41 +448,41 @@ function App() {
                 fallbackText=""
               />
             </Link> */}
-          </Box>
+                </Box>
 
-          {/* Center - Confidential */}
-          <Box sx={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center" }}>
-            <Typography
-              variant="body2"
-              sx={{ color: "#666666", fontSize: "0.75rem", fontWeight: 500 }}
-            >
-              Confidential - Internal Use Only
-            </Typography>
-          </Box>
+                {/* Center - Confidential */}
+                <Box sx={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center" }}>
+                  <Typography
+                    variant="body2"
+                    sx={{ color: "#666666", fontSize: "0.75rem", fontWeight: 500 }}
+                  >
+                    Confidential - Internal Use Only
+                  </Typography>
+                </Box>
 
-          {/* Right side - Contact Us */}
-          <Box sx={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
-            <Link
-              href={`mailto:${APP_CONFIG.contactEmail}`}
-              underline="hover"
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 0.5,
-                color: PURE_ORANGE,
-                fontSize: "0.75rem",
-                fontWeight: 500,
-                "&:hover": { color: "#1a6bbf" },
-              }}
-            >
-              <EmailIcon sx={{ fontSize: 14 }} />
-              Contact Us
-            </Link>
-          </Box>
-        </Box>
-      </Box>
-    </ThemeProvider>
-  );
+                {/* Right side - Contact Us */}
+                <Box sx={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
+                  <Link
+                    href={`mailto:${APP_CONFIG.contactEmail}`}
+                    underline="hover"
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      color: PURE_ORANGE,
+                      fontSize: "0.75rem",
+                      fontWeight: 500,
+                      "&:hover": { color: "#1a6bbf" },
+                    }}
+                  >
+                    <EmailIcon sx={{ fontSize: 14 }} />
+                    Contact Us
+                  </Link>
+                </Box>
+              </Box>
+            </Box>
+        </ThemeProvider>
+        );
 }
 
-export default App;
+        export default App;
