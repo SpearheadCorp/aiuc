@@ -153,6 +153,33 @@ function App() {
           />
         </Box>
         <Box sx={{ flex: 1, overflow: "hidden", display: activeTab === 1 ? "flex" : "none", flexDirection: "column", p: 3 }}>
+          <Box sx={{ mb: 1 }}>
+            <Typography
+              variant="body2"
+              sx={{
+                color: "#444",
+                fontSize: "0.875rem",
+                lineHeight: 1.6,
+                fontStyle: "italic",
+                borderLeft: `3px solid ${PURE_ORANGE}`,
+                pl: 1.5,
+                mb: 1,
+              }}
+            >
+              An internal library of curated AI use cases spanning industries and business functions — with implementation details, expected outcomes, tools, and frameworks to help your team discover and act on AI opportunities faster.
+            </Typography>
+            <Typography variant="body2" sx={{ color: "#666", fontSize: "0.82rem" }}>
+              Need help getting started?{" "}
+              <Link
+                component="button"
+                onClick={() => setActiveTab(2)}
+                underline="hover"
+                sx={{ color: PURE_ORANGE, fontWeight: 500, fontSize: "0.82rem", cursor: "pointer", verticalAlign: "baseline" }}
+              >
+                Visit our How to Use tab.
+              </Link>
+            </Typography>
+          </Box>
           <IndustryDataTable
             data={industryData}
             loading={loadingIndustry}
