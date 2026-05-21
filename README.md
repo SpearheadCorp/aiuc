@@ -121,18 +121,34 @@ VITE_API_BASE_URL=http://localhost:3001
 
 > **Why `OPENAI_API_KEY_N`?** If your machine already has `OPENAI_API_KEY` set as a system environment variable (e.g., from another project), the `.env.local` loader would skip it because the key already exists in the process environment. Using a unique name (`OPENAI_API_KEY_N`) guarantees the correct key is always picked up from `.env.local` regardless of what is set system-wide.
 
-### 4. Generate embeddings (first time only)
+### 4. Download embeddings from S3 (or generate locally)
 
-`use_cases.json` and `industry_use_cases.json` are already committed in `public/data/` — you don't need to create or copy them anywhere. What you do need to generate are the **embedding files** (vectors computed from that data), which are gitignored due to their size:
+**Embedding files are already pre-computed and stored in S3.** For local development, you have two options:
+
+#### Option A — Use S3 embeddings (Recommended for quick setup)
+
+The embedding files are already in the S3 bucket used by production. The local dev server can fetch them:
+
+```bash
+# Option A: Copy embeddings from S3 to local (requires AWS credentials)
+aws s3 cp s3://YOUR_BUCKET_NAME/pure_use_cases_embeddings.json public/data/
+aws s3 cp s3://YOUR_BUCKET_NAME/pure_industry_use_cases_embeddings.json public/data/
+```
+
+This way you get the same pre-computed vectors as production without waiting for generation.
+
+#### Option B — Generate embeddings locally (if data changed)
+
+If you've modified `use_cases.json` or `industry_use_cases.json`, regenerate embeddings locally:
 
 ```bash
 npm run embeddings          # → public/data/pure_use_cases_embeddings.json
 npm run embeddings:industry # → public/data/pure_industry_use_cases_embeddings.json
 ```
 
-Each script reads `.env.local` automatically, so no shell env var setup is needed. Re-run only when the source JSON data changes.
+Each script reads `.env.local` automatically. This calls OpenAI's `text-embedding-3-small` API (requires `OPENAI_API_KEY_N` in `.env.local`). Re-run only when source JSON data changes.
 
-> See [OpenAI Embedding Pipeline](#openai-embedding-pipeline) for a full explanation of what these files are and why they exist.
+> See [OpenAI Embedding Pipeline](#openai-embedding-pipeline) for details on what these files are and how to manage them.
 
 ### 5. Start development servers (two terminals)
 
@@ -475,18 +491,28 @@ Run from the `lambda/` directory:
 
 ## Deployment
 
-### Step 1 — Generate & Upload Embeddings
+### Step 1 — Verify Embeddings in S3
 
-Do this whenever the data files change or when setting up a fresh environment.
+**Pre-computed embeddings are already available in your S3 bucket.** Verify they exist:
+
+```bash
+# Check that embedding files are in S3
+aws s3 ls s3://YOUR_BUCKET_NAME/pure_use_cases_embeddings.json
+aws s3 ls s3://YOUR_BUCKET_NAME/pure_industry_use_cases_embeddings.json
+
+# If they exist, you can skip Step 2 below.
+```
+
+### Step 1b — Generate & Upload Embeddings (if data changed)
+
+**Only do this if you've modified `use_cases.json` or `industry_use_cases.json`:**
 
 ```bash
 # 1. Generate embedding files locally (reads OPENAI_API_KEY_N from .env.local)
 npm run embeddings
 npm run embeddings:industry
 
-# 2. Upload to S3
-#    The pure_ prefix keeps Everpure files separate from Spearhead files
-#    that may share the same bucket.
+# 2. Upload to S3 (the pure_ prefix keeps Everpure separate from Spearhead)
 aws s3 cp public/data/pure_use_cases_embeddings.json \
   s3://YOUR_BUCKET_NAME/pure_use_cases_embeddings.json
 
@@ -494,7 +520,7 @@ aws s3 cp public/data/pure_industry_use_cases_embeddings.json \
   s3://YOUR_BUCKET_NAME/pure_industry_use_cases_embeddings.json
 ```
 
-> These files are 1–3 MB each and are **not committed to git**. Always regenerate from the source JSON files when data changes.
+> These files are 1–3 MB each and are **not committed to git**. Regenerate from source JSON only when data changes.
 
 ### Step 2 — Build & Upload Frontend
 

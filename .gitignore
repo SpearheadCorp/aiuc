@@ -48,6 +48,15 @@ public/data/*_embeddings.json
 
 # Local Gmail test files (contain credentials / generated output)
 lambda/test-gmail-send-local.mjs
+
+# Claude Code / Local dev artifacts
+.claude/
+.playwright-mcp/
+dist1/
+
+# Temporary patch and text files
+*.patch
+gitpathch.txt
 lambda/test-template-local.mjs
 lambda/test-email-output.html
 lambda/work.txt

@@ -104,6 +104,12 @@ else
     echo "SNS notifications      : NONE (set SNS_TOPIC_ARN to enable email/SMS alerts)"
 fi
 echo ""
+echo "⚠️  IMPORTANT: Current rate limiting is per-Lambda-container (in-memory)."
+echo "   If Lambda scales to multiple containers, each has its own limit store."
+echo "   For true distributed rate limiting across containers, implement:"
+echo "   - DynamoDB with TTL (recommended for production)"
+echo "   - Redis/ElastiCache (for high-throughput scenarios)"
+echo ""
 echo "To adjust in-Lambda sliding-window limits, set these env vars on the function:"
 echo "  SEARCH_RATE_LIMIT_MAX=10         (requests per user per window)"
 echo "  SEARCH_RATE_LIMIT_WINDOW_MS=60000 (window size in ms)"

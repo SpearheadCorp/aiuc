@@ -40,6 +40,8 @@ const RATE_LIMIT_WINDOW = Math.max(1, parseInt(process.env.SEARCH_RATE_LIMIT_WIN
 
 // Per-user request timestamp store — lives for the lifetime of this Lambda container.
 // Key: userId (JWT sub claim).  Value: array of request timestamps (ms).
+// NOTE: Per-container in-memory store. For distributed rate limiting across multiple Lambda containers,
+// consider DynamoDB or ElastiCache. Combined with Lambda reserved concurrency for hard cap.
 const rateLimitStore = new Map();
 
 /**
@@ -151,13 +153,23 @@ async function requireAuth(event) {
 // secret so Everpure only needs to manage a single Secrets Manager entry.
 // Expected secret JSON shape:
 //   { "OKTA_CLIENT_ID": "...", "EVERPURE_OPENAI_API_KEY": "sk-..." }
+// Cache refreshed every 5 minutes to allow key rotation without Lambda redeploy.
 let cachedSecrets = null;
+let secretsCacheTime = 0;
+const SECRETS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 async function getSecrets() {
-    if (cachedSecrets) return cachedSecrets;
-    const command = new GetSecretValueCommand({ SecretId: AIUC_SECRET_NAME });
-    const response = await secretsManager.send(command);
-    cachedSecrets = JSON.parse(response.SecretString);
+    const now = Date.now();
+
+    // Refresh if expired or first call
+    if (!cachedSecrets || (now - secretsCacheTime) > SECRETS_CACHE_TTL_MS) {
+        const command = new GetSecretValueCommand({ SecretId: AIUC_SECRET_NAME });
+        const response = await secretsManager.send(command);
+        cachedSecrets = JSON.parse(response.SecretString);
+        secretsCacheTime = now;
+        console.log("[Secrets] refreshed from Secrets Manager");
+    }
+
     return cachedSecrets;
 }
 
@@ -233,7 +245,14 @@ async function getS3Object(key, contentType, cacheControl) {
 function json(statusCode, data) {
     return {
         statusCode,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+            "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "X-XSS-Protection": "1; mode=block",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+        },
         body: JSON.stringify(data),
     };
 }
