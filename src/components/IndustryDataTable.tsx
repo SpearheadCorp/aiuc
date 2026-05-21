@@ -1220,7 +1220,13 @@ export default function IndustryDataTable({
                     key={row.id}
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
-                    onClick={() => toggleRowExpansion(row.original.Id)}
+                    onClick={(e) => {
+                      // Only toggle expansion if clicking on the row itself, not on interactive elements
+                      const target = e.target as HTMLElement;
+                      if (!target.closest('button') && !target.closest('[role="button"]')) {
+                        toggleRowExpansion(row.original.Id);
+                      }
+                    }}
                     sx={{
                       display: "grid",
                       gridTemplateColumns: `50px ${columns

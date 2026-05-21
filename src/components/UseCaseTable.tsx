@@ -1157,6 +1157,13 @@ export default function UseCaseTable({
                     key={row.id}
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
+                    onClick={(e) => {
+                      // Only toggle expansion if clicking on the row itself, not on interactive elements
+                      const target = e.target as HTMLElement;
+                      if (!target.closest('button') && !target.closest('[role="button"]')) {
+                        toggleRowExpansion(row.original.id);
+                      }
+                    }}
                     sx={{
                       display: "grid",
                       gridTemplateColumns: `50px ${columns
@@ -1171,6 +1178,7 @@ export default function UseCaseTable({
                       backgroundColor: "#ffffff",
                       borderBottom: "1px solid #e0e0e0",
                       transition: "background-color 0.2s ease",
+                      cursor: "pointer",
                       "&:hover": {
                         backgroundColor: "#fafafa",
                       },
